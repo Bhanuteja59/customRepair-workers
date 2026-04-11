@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "clean": "cmd /c \"del /s /q app\\*.tsx\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
