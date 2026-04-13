@@ -6,11 +6,13 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const WS  = process.env.NEXT_PUBLIC_WS_URL  ?? "ws://localhost:8000";
 
 const STATUS_THEMES = {
+  open:        { label: "Wait for Admin", badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   pending:     { label: "Wait for Admin", badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  assigned:    { label: "New Job for You!",   badge: "badge-info",     icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
-  accepted:    { label: "Ready to Start",        badge: "badge-success",  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
-  in_progress: { label: "Working Now",  badge: "badge-success",  icon: "M13 10V3L4 14h7v7l9-11h-7z" },
-  completed:   { label: "Done!",        badge: "badge-info",     icon: "M5 13l4 4L19 7" },
+  assigned:    { label: "New Job for You!", badge: "badge-info",     icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
+  claimed:     { label: "Ready to Start",   badge: "badge-success",  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  accepted:    { label: "Ready to Start",   badge: "badge-success",  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  in_progress: { label: "Working Now",      badge: "badge-success",  icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+  completed:   { label: "Done!",            badge: "badge-info",     icon: "M5 13l4 4L19 7" },
 };
 
 function LucideIcon({ d, className = "w-4 h-4" }) {
@@ -39,7 +41,7 @@ export default function WorkerDashboard() {
   // Helper to filter jobs by tab
   const getFilteredJobs = () => {
     if (activeTab === "open_market") return availableJobs;
-    if (activeTab === "start_work") return jobs.filter(j => ['assigned', 'accepted'].includes(j.status));
+    if (activeTab === "start_work") return jobs.filter(j => ['assigned', 'claimed'].includes(j.status));
     if (activeTab === "work_progress") return jobs.filter(j => j.status === 'in_progress');
     if (activeTab === "completed") return jobs.filter(j => j.status === 'completed');
     return [];
@@ -96,6 +98,11 @@ export default function WorkerDashboard() {
             msg: `New ${booking?.service} request in ${booking?.user?.address?.split(',')[0]}`, data: data
           });
           setTimeout(() => setNotification(prev => prev?.id === (data.assignment_id || data.assignment?.id) ? null : prev), 15000);
+        } else if (data.type === "job_claimed") {
+          if (data.worker_id !== wid) {
+            setAvailableJobs(prev => prev.filter(job => job.id !== data.assignment_id));
+            setNotification(prev => prev?.id === data.assignment_id ? null : prev);
+          }
         }
       } catch (err) { console.error(err); }
       fetchData();
@@ -133,7 +140,14 @@ export default function WorkerDashboard() {
       });
       if (res.ok) {
         fetchData();
-        if (status === 'accepted') setNotification(null);
+        if (status === 'claimed') setNotification(null);
+      } else {
+        const errData = await res.json().catch(() => null);
+        if (errData && errData.success === false) {
+          alert(errData.message);
+        } else if (errData && errData.detail) {
+          alert(errData.detail);
+        }
       }
     } catch (err) { console.error(err); }
   }
@@ -182,7 +196,7 @@ export default function WorkerDashboard() {
               { id: "work_progress", label: "In Progress", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
               { id: "completed", label: "Completed", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
             ].map(item => {
-              const count = item.id === "start_work" ? jobs.filter(j=>['assigned','accepted'].includes(j.status)).length :
+              const count = item.id === "start_work" ? jobs.filter(j=>['assigned','claimed'].includes(j.status)).length :
                             item.id === "work_progress" ? jobs.filter(j=>j.status==='in_progress').length :
                             jobs.filter(j=>j.status==='completed').length;
               return (
@@ -261,6 +275,19 @@ export default function WorkerDashboard() {
             const isMarket = activeTab === 'open_market';
             const hideSensitive = isCompleted || isMarket;
 
+            const timeParts = a.booking?.preferred_time?.split(/\s*[-\u2013]\s*/) || [];
+            const slotStartLabel = timeParts[0];
+            const {start, end} = (() => {
+              if (!a.booking?.preferred_date || timeParts.length !== 2) return {start: null, end: null};
+              return {
+                start: new Date(`${a.booking.preferred_date} ${timeParts[0]}`),
+                end: new Date(`${a.booking.preferred_date} ${timeParts[1]}`)
+              };
+            })();
+            
+            const canStart = start && end ? (currentTime >= start && currentTime < end) : true;
+            const canComplete = start && end ? (currentTime >= new Date(end.getTime() - 30*60000)) : true;
+
             return (
               <div key={a.id} className="card-pro p-6 fade-in group">
                  <div className="flex flex-col md:flex-row gap-6">
@@ -327,11 +354,24 @@ export default function WorkerDashboard() {
   
                     <div className="md:w-[200px] flex flex-col justify-end gap-3 pt-6 md:pt-0 md:border-l md:pl-6 border-slate-100">
                        {activeTab === "open_market" && (
-                          <button onClick={() => updateStatus(a.id, 'accepted')} className="btn-pro btn-pro-primary w-full shadow-emerald-100">Claim Job</button>
+                          <button onClick={() => updateStatus(a.id, 'claimed')} className="btn-pro btn-pro-primary w-full shadow-emerald-100">Claim Job</button>
                        )}
-                       {a.status === 'assigned' && <button onClick={() => updateStatus(a.id, 'accepted')} className="btn-pro btn-pro-primary w-full">Confirm Job</button>}
-                       {a.status === 'accepted' && <button onClick={() => updateStatus(a.id, 'in_progress')} className="btn-pro btn-pro-primary w-full">Start Work</button>}
-                       {a.status === 'in_progress' && <button onClick={() => updateStatus(a.id, 'completed')} className="btn-pro btn-pro-primary w-full bg-sky-600 hover:bg-sky-700">Finish Work</button>}
+                       {a.status === 'assigned' && <button onClick={() => updateStatus(a.id, 'claimed')} className="btn-pro btn-pro-primary w-full">Confirm Job</button>}
+                       
+                       {a.status === 'claimed' && (
+                         <div className="w-full">
+                           {!canStart && slotStartLabel && <p className="text-[9px] font-bold text-slate-400 text-center mb-1 uppercase tracking-widest">Starts {a.booking?.preferred_date} at {slotStartLabel}</p>}
+                           <button onClick={() => updateStatus(a.id, 'in_progress')} disabled={!canStart} className="btn-pro btn-pro-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">Start Work</button>
+                         </div>
+                       )}
+                       
+                       {a.status === 'in_progress' && (
+                         <div className="w-full">
+                           {!canComplete && end && <p className="text-[9px] font-bold text-slate-400 text-center mb-1 uppercase tracking-widest">Complete {a.booking?.preferred_date} after {new Date(end.getTime() - 30*60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>}
+                           <button onClick={() => updateStatus(a.id, 'completed')} disabled={!canComplete} className="btn-pro btn-pro-primary w-full bg-sky-600 hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-300">Finish Work</button>
+                         </div>
+                       )}
+                       
                        {a.status === 'completed' && <div className="text-center text-emerald-500 font-bold text-[10px] uppercase tracking-widest bg-emerald-50 py-2 rounded-lg border border-emerald-100 italic">Closed Ticket</div>}
                     </div>
                  </div>
@@ -367,7 +407,7 @@ export default function WorkerDashboard() {
                 
                 <div className="flex items-center gap-3">
                   <button 
-                    onClick={() => updateStatus(notification.id, 'accepted')}
+                    onClick={() => updateStatus(notification.id, 'claimed')}
                     className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95 ${
                       notification.type === 'assignment' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-emerald-600 hover:bg-emerald-500'
                     }`}
