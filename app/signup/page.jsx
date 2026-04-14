@@ -15,7 +15,7 @@ const SPECIALIZATIONS = [
 export default function WorkerSignupPage() {
   const router = useRouter();
   const [form, setForm] = useState({
-    name: "", email: "", phone: "", password: "", confirm: "", specialization: "",
+    name: "", email: "", phone: "", password: "", confirm: "", specializations: [],
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -35,7 +35,7 @@ export default function WorkerSignupPage() {
           email: form.email,
           phone: form.phone || null,
           password: form.password,
-          specialization: form.specialization || null,
+          specializations: form.specializations,
         }),
       });
       const data = await res.json();
@@ -98,17 +98,36 @@ export default function WorkerSignupPage() {
                   placeholder="(555) 000-0000" className="input-pro" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Trade</label>
-                <select
-                  value={form.specialization}
-                  onChange={e => setForm(f => ({ ...f, specialization: e.target.value }))}
-                  className="input-pro bg-white appearance-none h-[46px]"
-                >
-                  <option value="">Select...</option>
-                  {SPECIALIZATIONS.map(s => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Trades & Specializations</label>
+                <div className="flex flex-wrap gap-2">
+                  {SPECIALIZATIONS.map(s => {
+                    const isSelected = form.specializations.includes(s.value);
+                    return (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => {
+                          setForm(f => ({
+                            ...f,
+                            specializations: isSelected 
+                              ? f.specializations.filter(v => v !== s.value)
+                              : [...f.specializations, s.value]
+                          }));
+                        }}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                          isSelected 
+                            ? "bg-primary text-white border-primary shadow-lg shadow-emerald-900/10" 
+                            : "bg-white text-slate-500 border-slate-200 hover:border-primary hover:text-primary"
+                        }`}
+                      >
+                        {s.label.split(' — ')[0]}
+                      </button>
+                    );
+                  })}
+                </div>
+                {form.specializations.length === 0 && (
+                  <p className="text-[10px] text-slate-400 mt-2 italic font-medium">Please select at least one trade to see relevant jobs.</p>
+                )}
               </div>
             </div>
 
@@ -129,8 +148,8 @@ export default function WorkerSignupPage() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full btn-pro btn-pro-primary h-12 text-sm mt-4 shadow-md shadow-emerald-100"
+              disabled={loading || form.specializations.length === 0}
+              className="w-full btn-pro btn-pro-primary h-12 text-sm mt-4 shadow-md shadow-emerald-100 disabled:opacity-50"
             >
               {loading ? (
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

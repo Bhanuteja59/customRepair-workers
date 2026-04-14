@@ -10,9 +10,9 @@ const STATUS_THEMES = {
   pending:     { label: "Wait for Admin", badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   assigned:    { label: "New Job for You!", badge: "badge-info",     icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
   claimed:     { label: "Ready to Start",   badge: "badge-success",  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
-  accepted:    { label: "Ready to Start",   badge: "badge-success",  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
   in_progress: { label: "Working Now",      badge: "badge-success",  icon: "M13 10V3L4 14h7v7l9-11h-7z" },
   completed:   { label: "Done!",            badge: "badge-info",     icon: "M5 13l4 4L19 7" },
+  expired:     { label: "Missed Slot",      badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
 };
 
 function LucideIcon({ d, className = "w-4 h-4" }) {
@@ -28,9 +28,12 @@ export default function WorkerDashboard() {
   const [worker, setWorker] = useState(null);
   const [token, setToken] = useState(null);
   const [activeTab, setActiveTab] = useState("start_work");
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileForm, setProfileForm] = useState(null);
 
   const [jobs, setJobs] = useState([]);
   const [availableJobs, setAvailableJobs] = useState([]);
+  const [selectedJob, setSelectedJob] = useState(null);
   // ... rest of state same ...
   const [wsStatus, setWsStatus] = useState("idle");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -38,10 +41,61 @@ export default function WorkerDashboard() {
   const [notification, setNotification] = useState(null);
   const wsRef = useRef(null);
 
+  // Helper to calculate timing requirements
+  const calculateJobTimings = (job) => {
+    if (!job?.booking?.preferred_date) return { canStart: true, canComplete: true, start: null, end: null, label: null };
+    const timeParts = job.booking.preferred_time?.split(/\s*[-\u2013]\s*/) || [];
+    if (timeParts.length !== 2) return { canStart: true, canComplete: true, start: null, end: null, label: null };
+    
+    const start = new Date(`${job.booking.preferred_date} ${timeParts[0]}`);
+    const end = new Date(`${job.booking.preferred_date} ${timeParts[1]}`);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return { canStart: true, canComplete: true, start: null, end: null, label: null };
+    
+    const canStart = currentTime >= start && currentTime < end;
+    const canComplete = currentTime >= new Date(end.getTime() - 30 * 60000); // Allow finish 30m before end
+    
+    let label = null;
+    if (currentTime < start) {
+      const diffMs = start - currentTime;
+      const diffHrs = Math.floor(diffMs / 3600000);
+      const diffMins = Math.round((diffMs % 3600000) / 60000);
+      label = diffHrs > 0 ? `Starts in ${diffHrs}h ${diffMins}m` : `Starts in ${diffMins}m`;
+    } else if (currentTime > end) {
+      label = "Slot Window Passed";
+    }
+    
+    return { canStart, canComplete, start, end, label };
+  };
+
+  const getSkills = (service) => {
+    const s = (service || "").toLowerCase();
+    const skills = [];
+    if (s.includes("plumb")) skills.push("plumbing");
+    if (s.includes("hvac") || s.includes("ac ") || s.includes("furnace") || s.includes("heat") || s.includes("thermostat")) skills.push("hvac");
+    if (s.includes("electr")) skills.push("electrical");
+    if (skills.length === 0) skills.push("general");
+    return skills;
+  };
+
   // Helper to filter jobs by tab
   const getFilteredJobs = () => {
-    if (activeTab === "open_market") return availableJobs;
-    if (activeTab === "start_work") return jobs.filter(j => ['assigned', 'claimed'].includes(j.status));
+    const isExpired = (a) => {
+      const { end } = calculateJobTimings(a);
+      if (!end) return false;
+      return currentTime > end;
+    };
+
+    if (activeTab === "open_market") {
+      return availableJobs.filter(a => {
+        const required = getSkills(a.booking?.service);
+        const workerSkills = worker.specializations || [];
+        // Support both old 'specialization' and new 'specializations' list
+        const techSkills = Array.isArray(workerSkills) ? workerSkills : [workerSkills];
+        return required.every(s => techSkills.includes(s));
+      });
+    }
+    if (activeTab === "start_work") return jobs.filter(j => ['assigned', 'claimed'].includes(j.status) && !isExpired(j));
     if (activeTab === "work_progress") return jobs.filter(j => j.status === 'in_progress');
     if (activeTab === "completed") return jobs.filter(j => j.status === 'completed');
     return [];
@@ -152,6 +206,24 @@ export default function WorkerDashboard() {
     } catch (err) { console.error(err); }
   }
 
+  async function updateProfile(e) {
+    if (e) e.preventDefault();
+    try {
+      const res = await fetch(`${API}/api/workers/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(profileForm),
+      });
+      if (res.ok) {
+        const updatedWorker = await res.json();
+        setWorker(updatedWorker);
+        localStorage.setItem("worker_data", JSON.stringify(updatedWorker));
+        setNotification({ type: "success", title: "Profile Updated", msg: "Your skills and info have been saved." });
+        setActiveTab("start_work");
+      }
+    } catch (err) { console.error(err); }
+  }
+
   const logout = () => { localStorage.clear(); router.replace("/login"); };
 
   if (!worker) return null;
@@ -196,9 +268,12 @@ export default function WorkerDashboard() {
               { id: "work_progress", label: "In Progress", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
               { id: "completed", label: "Completed", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
             ].map(item => {
-              const count = item.id === "start_work" ? jobs.filter(j=>['assigned','claimed'].includes(j.status)).length :
-                            item.id === "work_progress" ? jobs.filter(j=>j.status==='in_progress').length :
-                            jobs.filter(j=>j.status==='completed').length;
+              const count = item.id === "start_work" ? jobs.filter(j => ['assigned', 'claimed'].includes(j.status) && (() => {
+                const { end } = calculateJobTimings(j);
+                return !end || currentTime <= end;
+              })()).length :
+                            item.id === "work_progress" ? jobs.filter(j => j.status === 'in_progress').length :
+                            jobs.filter(j => j.status === 'completed').length;
               return (
                 <button
                   key={item.id}
@@ -222,23 +297,155 @@ export default function WorkerDashboard() {
           </nav>
         </div>
 
-        <div className="mt-auto pt-6 border-t border-white/5">
-           <div className="flex items-center gap-3 px-2 mb-4">
-              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white font-bold text-[10px]">{worker.name.charAt(0)}</div>
-              <div className="overflow-hidden">
-                <p className="text-[10px] font-bold text-white truncate">{worker.name}</p>
-                <p className="text-[9px] font-bold text-slate-500 truncate capitalize">{worker.specialization || 'Tech'}</p>
-              </div>
-           </div>
-           <button onClick={logout} className="w-full py-2.5 rounded-xl border border-white/10 text-slate-400 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 text-[10px] font-black uppercase transition-all">
-              Log Out
+        <div className="mt-auto px-2 space-y-2">
+           <button
+             onClick={() => {
+                setProfileForm({ name: worker.name, phone: worker.phone, specializations: worker.specializations || [] });
+                setActiveTab("profile");
+             }}
+             className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+               activeTab === "profile" ? 'bg-primary text-white shadow-xl shadow-emerald-900/30' : 'text-slate-400 hover:text-white hover:bg-white/5'
+             }`}
+           >
+             <div className="flex items-center gap-3">
+               <LucideIcon d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+               My Profile
+             </div>
+           </button>
+           <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-400 hover:text-red-400 hover:bg-red-900/10 transition-all">
+             <LucideIcon d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+             Log Out
            </button>
         </div>
       </aside>
 
       {/* ── Main content ── */}
       <main className="flex-1 ml-64 p-8 max-w-5xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-10">
+        {activeTab === 'profile' ? (
+           <div className="fade-in">
+              <div className="mb-10">
+                 <h2 className="text-3xl font-black text-slate-900 tracking-tighter">My Settings</h2>
+                 <p className="text-xs font-black text-slate-400 mt-1 uppercase tracking-widest italic">Technician Identity & Skills</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                 <div className="space-y-6">
+                    <div className="card-pro p-8 bg-white border-none shadow-xl">
+                       <form onSubmit={updateProfile} className="space-y-6">
+                          <div>
+                             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Professional Trades</label>
+                             <div className="flex flex-wrap gap-2">
+                                {[
+                                   { value: "hvac", label: "HVAC" },
+                                   { value: "plumbing", label: "Plumbing" },
+                                   { value: "electrical", label: "Electrical" },
+                                   { value: "general", label: "General" }
+                                ].map(s => {
+                                   const isSelected = profileForm?.specializations.includes(s.value);
+                                   return (
+                                      <button
+                                         key={s.value}
+                                         type="button"
+                                         onClick={() => {
+                                            const current = profileForm.specializations;
+                                            const next = isSelected 
+                                               ? current.filter(v => v !== s.value)
+                                               : [...current, s.value];
+                                            setProfileForm(prev => ({ ...prev, specializations: next }));
+                                         }}
+                                         className={`px-4 py-2.5 rounded-xl text-xs font-bold border transition-all ${
+                                            isSelected 
+                                            ? "bg-primary text-white border-primary shadow-lg shadow-emerald-900/10" 
+                                            : "bg-slate-50 text-slate-500 border-slate-100 hover:border-primary hover:text-primary"
+                                         }`}
+                                      >
+                                         {s.label}
+                                      </button>
+                                   );
+                                })}
+                             </div>
+                             {profileForm?.specializations.length === 0 && (
+                                <p className="text-[10px] text-red-400 mt-3 font-bold uppercase tracking-tight">Select at least one trade to remain active.</p>
+                             )}
+                          </div>
+                          
+                          <div className="h-px bg-slate-100 w-full" />
+                          
+                          <div className="space-y-4">
+                            <div>
+                               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Technician Name</label>
+                               <input 
+                                 type="text" 
+                                 value={profileForm?.name || ""} 
+                                 onChange={e => setProfileForm(p => ({ ...p, name: e.target.value }))}
+                                 className="input-pro !bg-slate-50 border-transparent focus:!bg-white" 
+                               />
+                            </div>
+                            
+                            <div>
+                               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">On-Site Phone</label>
+                               <input 
+                                 type="tel" 
+                                 value={profileForm?.phone || ""} 
+                                 onChange={e => setProfileForm(p => ({ ...p, phone: e.target.value }))}
+                                 className="input-pro !bg-slate-50 border-transparent focus:!bg-white" 
+                               />
+                            </div>
+                          </div>
+                          
+                          <button 
+                            type="submit" 
+                            disabled={profileForm?.specializations.length === 0}
+                            className="w-full btn-pro btn-pro-primary !py-4 shadow-xl shadow-emerald-900/20 disabled:grayscale disabled:opacity-50"
+                          >
+                             Apply Profile Changes
+                          </button>
+                       </form>
+                    </div>
+                 </div>
+
+                 <div className="space-y-6">
+                    <div className="card-pro p-8 bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden group">
+                       <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+                          <LucideIcon d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" className="w-24 h-24" />
+                       </div>
+                       <h3 className="text-xl font-black mb-1">Fleet Security</h3>
+                       <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-8">Verification Status</p>
+                       
+                       <div className="space-y-3">
+                          <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                             <div>
+                                <p className="text-xs font-black uppercase tracking-widest text-emerald-500">Live & Authenticated</p>
+                                <p className="text-[10px] text-slate-500 font-bold mt-1">Worker ID: {worker.id}</p>
+                             </div>
+                             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.8)]" />
+                          </div>
+                          
+                          <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 opacity-60">
+                             <div>
+                                <p className="text-xs font-black uppercase tracking-widest text-slate-300">Identity Record</p>
+                                <p className="text-[10px] text-slate-500 font-bold mt-1">Background Status: Cleared</p>
+                             </div>
+                             <LucideIcon d="M9 12l2 2 4-4" className="text-emerald-500 w-5 h-5" />
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="bg-amber-50 rounded-3xl p-6 border border-amber-100 flex items-start gap-4">
+                       <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                          <LucideIcon d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" className="w-6 h-6 text-amber-600" />
+                       </div>
+                       <div>
+                          <p className="text-xs font-black text-amber-900 uppercase tracking-widest mb-1 leading-none">Dispatcher Note</p>
+                          <p className="text-[11px] text-amber-700 font-medium leading-relaxed italic">"Adding more skills will instantly reveal complex multi-trade leads in your area. Keep your profile sharp!"</p>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+           </div>
+        ) : (
+           <>
+              <div className="flex items-center justify-between mb-10">
            <div>
              <h2 className="text-3xl font-black text-slate-900 leading-tight">
                {activeTab === "open_market" ? "Job Market" : 
@@ -274,31 +481,27 @@ export default function WorkerDashboard() {
             const isCompleted = a.status === 'completed';
             const isMarket = activeTab === 'open_market';
             const hideSensitive = isCompleted || isMarket;
-
-            const timeParts = a.booking?.preferred_time?.split(/\s*[-\u2013]\s*/) || [];
-            const slotStartLabel = timeParts[0];
-            const {start, end} = (() => {
-              if (!a.booking?.preferred_date || timeParts.length !== 2) return {start: null, end: null};
-              return {
-                start: new Date(`${a.booking.preferred_date} ${timeParts[0]}`),
-                end: new Date(`${a.booking.preferred_date} ${timeParts[1]}`)
-              };
-            })();
             
-            const canStart = start && end ? (currentTime >= start && currentTime < end) : true;
-            const canComplete = start && end ? (currentTime >= new Date(end.getTime() - 30*60000)) : true;
+            const { canStart, canComplete, label } = calculateJobTimings(a);
 
             return (
-              <div key={a.id} className="card-pro p-6 fade-in group">
+              <div key={a.id} onClick={() => setSelectedJob(a)} className="card-pro p-6 fade-in group cursor-pointer hover:shadow-xl transition-all hover:bg-white active:scale-[0.99]">
                  <div className="flex flex-col md:flex-row gap-6">
-                    <div className="flex-1 space-y-4">
-                       <div className="flex items-start justify-between">
-                          <div>
-                             <span className={`badge ${STATUS_THEMES[a.status]?.badge || 'badge-info'}`}>
-                               {STATUS_THEMES[a.status]?.label || a.status}
-                             </span>
-                             <h3 className="text-lg font-black text-slate-900 mt-2.5 capitalize">{a.booking?.service}</h3>
-                          </div>
+                     <div className="flex-1 space-y-4">
+                        <div className="flex items-start justify-between">
+                           <div>
+                              <div className="flex items-center gap-2">
+                                <span className={`badge ${STATUS_THEMES[a.status]?.badge || 'badge-info'}`}>
+                                  {STATUS_THEMES[a.status]?.label || a.status}
+                                </span>
+                              </div>
+                              <h3 className="text-lg font-black text-slate-900 mt-2.5 capitalize group-hover:text-primary transition-colors">{a.booking?.service}</h3>
+                              <div className="flex flex-wrap gap-1.5 mt-2">
+                                 {getSkills(a.booking?.service).map(skill => (
+                                   <span key={skill} className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest border border-slate-200/50">{skill}</span>
+                                 ))}
+                              </div>
+                           </div>
                           <div className="text-right">
                              <p className="text-sm font-bold text-slate-900 leading-none">ID: {a.booking?.id?.split('-')[0] || 'CR'}</p>
                              <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Ticket</p>
@@ -360,15 +563,15 @@ export default function WorkerDashboard() {
                        
                        {a.status === 'claimed' && (
                          <div className="w-full">
-                           {!canStart && slotStartLabel && <p className="text-[9px] font-bold text-slate-400 text-center mb-1 uppercase tracking-widest">Starts {a.booking?.preferred_date} at {slotStartLabel}</p>}
-                           <button onClick={() => updateStatus(a.id, 'in_progress')} disabled={!canStart} className="btn-pro btn-pro-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">Start Work</button>
+                           {label && <p className="text-[9px] font-bold text-slate-400 text-center mb-1 uppercase tracking-widest">{label}</p>}
+                           <button onClick={(e) => { e.stopPropagation(); updateStatus(a.id, 'in_progress'); }} disabled={!canStart} className="btn-pro btn-pro-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">Start Work</button>
                          </div>
                        )}
                        
                        {a.status === 'in_progress' && (
                          <div className="w-full">
-                           {!canComplete && end && <p className="text-[9px] font-bold text-slate-400 text-center mb-1 uppercase tracking-widest">Complete {a.booking?.preferred_date} after {new Date(end.getTime() - 30*60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>}
-                           <button onClick={() => updateStatus(a.id, 'completed')} disabled={!canComplete} className="btn-pro btn-pro-primary w-full bg-sky-600 hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-300">Finish Work</button>
+                           {!canComplete && <p className="text-[9px] font-bold text-slate-400 text-center mb-1 uppercase tracking-widest">Early Finish Window Locked</p>}
+                           <button onClick={(e) => { e.stopPropagation(); updateStatus(a.id, 'completed'); }} disabled={!canComplete} className="btn-pro btn-pro-primary w-full bg-sky-600 hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-300">Finish Work</button>
                          </div>
                        )}
                        
@@ -386,7 +589,9 @@ export default function WorkerDashboard() {
             </div>
           )}
         </div>
-      </main>
+      </>
+    )}
+  </main>
 
       {/* Real-time Notification Overlay */}
       {notification && (
@@ -405,28 +610,39 @@ export default function WorkerDashboard() {
                 </p>
                 <p className="text-base font-bold leading-tight mb-4">{notification.msg}</p>
                 
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={() => updateStatus(notification.id, 'claimed')}
-                    className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95 ${
-                      notification.type === 'assignment' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-emerald-600 hover:bg-emerald-500'
-                    }`}
-                  >
-                    {notification.type === 'assignment' ? 'Accept Job' : 'Claim Lead'}
-                  </button>
-                  <button 
-                    onClick={() => {
-                      if (notification.type === 'assignment') {
-                        updateStatus(notification.id, 'rejected');
-                        setNotification(null);
-                      } else {
-                        setNotification(null);
-                      }
-                    }}
-                    className="px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-                  >
-                    {notification.type === 'assignment' ? 'Reject' : 'Dismiss'}
-                  </button>
+                 <div className="flex items-center gap-3">
+                  {['assignment', 'lead'].includes(notification.type) ? (
+                    <>
+                      <button 
+                        onClick={() => updateStatus(notification.id, 'claimed')}
+                        className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95 ${
+                          notification.type === 'assignment' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-emerald-600 hover:bg-emerald-500'
+                        }`}
+                      >
+                        {notification.type === 'assignment' ? 'Accept Job' : 'Claim Lead'}
+                      </button>
+                      <button 
+                        onClick={() => {
+                          if (notification.type === 'assignment') {
+                            updateStatus(notification.id, 'rejected');
+                            setNotification(null);
+                          } else {
+                            setNotification(null);
+                          }
+                        }}
+                        className="px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                      >
+                        {notification.type === 'assignment' ? 'Reject' : 'Dismiss'}
+                      </button>
+                    </>
+                  ) : (
+                    <button 
+                      onClick={() => setNotification(null)}
+                      className="w-full py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest bg-white/10 text-white hover:bg-white/20 transition-all font-bold"
+                    >
+                      Got it
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -441,23 +657,138 @@ export default function WorkerDashboard() {
         </div>
       )}
 
+      {/* Job Detail Modal */}
+      {selectedJob && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-fade-in" onClick={() => setSelectedJob(null)}>
+           <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-slide-up border border-white/20" onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-900 p-10 text-white flex justify-between items-start relative overflow-hidden">
+                 {/* Decorative background element */}
+                 <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 blur-[100px] -mr-32 -mt-32 rounded-full" />
+                 
+                 <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                       <span className={`badge ${STATUS_THEMES[selectedJob.status]?.badge || 'badge-info'} !bg-white/10 !text-white border-white/20`}>
+                         {STATUS_THEMES[selectedJob.status]?.label || selectedJob.status}
+                       </span>
+                       <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest font-mono">Reference #{selectedJob.booking?.id?.split('-')[0]}</span>
+                    </div>
+                    <h2 className="text-4xl font-black tracking-tight capitalize leading-none">{selectedJob.booking?.service}</h2>
+                    <div className="flex flex-wrap gap-2 mt-4">
+                       {getSkills(selectedJob.booking?.service).map(skill => (
+                         <span key={skill} className="px-3 py-1 rounded-lg bg-white/10 text-white text-[10px] font-black uppercase tracking-widest border border-white/10">{skill}</span>
+                       ))}
+                    </div>
+                    <p className="text-slate-400 font-bold mt-4 flex items-center gap-2">
+                       <LucideIcon d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" className="w-4 h-4" />
+                       {selectedJob.booking?.preferred_date} · {selectedJob.booking?.preferred_time}
+                    </p>
+                 </div>
+                 <button onClick={() => setSelectedJob(null)} className="relative z-10 p-3 hover:bg-white/10 rounded-2xl transition-all hover:rotate-90">
+                    <LucideIcon d="M6 18L18 6M6 6l12 12" className="w-6 h-6" />
+                 </button>
+              </div>
+              
+              <div className="p-10 space-y-10 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                 {/* Customer Section */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                    <div className="space-y-4">
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Customer Profile</p>
+                       <div className="flex items-center gap-5">
+                          <div className="w-16 h-16 rounded-[24px] bg-slate-100 flex items-center justify-center text-slate-900 font-black text-2xl shadow-inner">
+                            {selectedJob.booking?.user?.name?.charAt(0)}
+                          </div>
+                          <div>
+                             <p className="text-xl font-black text-slate-900 leading-tight">{selectedJob.booking?.user?.name}</p>
+                             <p className="text-sm font-bold text-primary mt-1">{selectedJob.booking?.user?.phone}</p>
+                          </div>
+                       </div>
+                    </div>
+                    
+                    <div className="space-y-4">
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Service Location</p>
+                       <div className="flex items-start gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                          <LucideIcon d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" className="w-5 h-5 text-slate-400 mt-0.5" />
+                          <p className="text-sm font-bold text-slate-700 leading-relaxed">{selectedJob.booking?.user?.address || 'Not specified'}</p>
+                       </div>
+                    </div>
+                 </div>
+
+                 {/* Problem Description */}
+                 <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Job Directives & Notes</p>
+                       <span className="w-12 h-1 bg-slate-100 rounded-full" />
+                    </div>
+                    <div className="p-8 rounded-[32px] bg-primary/5 border border-primary/10 relative group">
+                       <LucideIcon d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" className="absolute top-6 right-6 w-10 h-10 text-primary/10 group-hover:scale-110 transition-transform" />
+                       <p className="text-base font-medium text-slate-700 leading-relaxed italic relative z-10">
+                          "{selectedJob.booking?.notes || 'No specific notes provided by customer.'}"
+                       </p>
+                    </div>
+                 </div>
+
+                 {/* Status Flow Actions */}
+                 <div className="pt-6 border-t border-slate-100">
+                    <div className="flex flex-col gap-4">
+                       {(() => {
+                          const { canStart, canComplete, label } = calculateJobTimings(selectedJob);
+                          
+                          if (selectedJob.status === 'open_market' || selectedJob.status === 'pending' || selectedJob.status === 'assigned') {
+                             return <button onClick={(e) => { e.stopPropagation(); updateStatus(selectedJob.id, 'claimed'); setSelectedJob(null); }} className="btn-pro btn-pro-primary !py-5 text-base shadow-xl shadow-primary/20">Accept & Claim This Job</button>;
+                          }
+                          
+                          if (selectedJob.status === 'claimed') {
+                             return (
+                                <div className="space-y-3">
+                                   {label && <p className="text-center text-xs font-black uppercase text-amber-500 tracking-widest animate-pulse">{label}</p>}
+                                   <button 
+                                     onClick={(e) => { e.stopPropagation(); updateStatus(selectedJob.id, 'in_progress'); setSelectedJob(null); }} 
+                                     disabled={!canStart}
+                                     className="btn-pro btn-pro-primary !py-5 text-base w-full disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale"
+                                   >
+                                     Start On-Site Work
+                                   </button>
+                                </div>
+                             );
+                          }
+                          
+                          if (selectedJob.status === 'in_progress') {
+                             return (
+                                <div className="space-y-3">
+                                   {!canComplete && <p className="text-center text-[10px] font-bold uppercase text-slate-400 tracking-tighter">Please wait until near the end of the slot to finish</p>}
+                                   <button 
+                                     onClick={(e) => { e.stopPropagation(); updateStatus(selectedJob.id, 'completed'); setSelectedJob(null); }} 
+                                     disabled={!canComplete}
+                                     className="btn-pro btn-pro-primary !bg-sky-600 hover:!bg-sky-700 !py-5 text-base shadow-xl shadow-sky-900/10 w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                                   >
+                                     Mark as Successfully Completed
+                                   </button>
+                                </div>
+                             );
+                          }
+                          
+                          return <div className="text-center py-4 bg-emerald-50 rounded-2xl border border-emerald-100"><p className="text-emerald-600 font-black uppercase tracking-widest text-xs italic">Service Ticket Closed</p></div>;
+                       })()}
+                       
+                       <button onClick={() => setSelectedJob(null)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-2">
+                          Dismiss Details
+                       </button>
+                    </div>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+
       <style jsx global>{`
-        @keyframes bounce-in {
-          0% { transform: scale(0.3) translateY(100px); opacity: 0; }
-          50% { transform: scale(1.05) translateY(-10px); opacity: 1; }
-          70% { transform: scale(0.9) translateY(5px); }
-          100% { transform: scale(1) translateY(0); }
-        }
-        @keyframes progress-shrink {
-          from { width: 100%; }
-          to { width: 0%; }
-        }
-        .animate-bounce-in {
-          animation: bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        .animate-progress-shrink {
-          animation: progress-shrink 15s linear forwards;
-        }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slide-up { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-fade-in { animation: fade-in 0.3s ease-out; }
+        .animate-slide-up { animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
       `}</style>
     </div>
   );
