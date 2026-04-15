@@ -34,7 +34,10 @@ export default function WorkerDashboard() {
   const [jobs, setJobs] = useState([]);
   const [availableJobs, setAvailableJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
-  // ... rest of state same ...
+  const [mySlots, setMySlots] = useState([]);
+  const [slotForm, setSlotForm] = useState({ slot_date: "", start_time: "09:00 AM", end_time: "11:00 AM" });
+  const [slotSaving, setSlotSaving] = useState(false);
+  const [slotError, setSlotError] = useState("");
   const [wsStatus, setWsStatus] = useState("idle");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -111,6 +114,17 @@ export default function WorkerDashboard() {
     setWorker(JSON.parse(w));
   }, [router]);
   
+  const fetchSlots = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API}/api/workers/slots`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setMySlots(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Fetch slots error:", err);
+    }
+  }, [token]);
+
   // fetchData handles updating both jobs and availableJobs
   const fetchData = useCallback(async () => {
     if (!token || !worker) return;
@@ -130,6 +144,49 @@ export default function WorkerDashboard() {
       setIsRefreshing(false);
     }
   }, [token, worker]);
+
+  async function addSlot() {
+    if (!slotForm.slot_date || !slotForm.start_time || !slotForm.end_time) {
+      setSlotError("Please fill in all fields.");
+      return;
+    }
+    setSlotSaving(true);
+    setSlotError("");
+    try {
+      const res = await fetch(`${API}/api/workers/slots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(slotForm),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setSlotError(err.detail || "Failed to add slot.");
+      } else {
+        setSlotForm(f => ({ ...f, slot_date: "", start_time: "09:00 AM", end_time: "11:00 AM" }));
+        fetchSlots();
+      }
+    } catch {
+      setSlotError("Network error.");
+    } finally {
+      setSlotSaving(false);
+    }
+  }
+
+  async function deleteSlot(slotId) {
+    try {
+      const res = await fetch(`${API}/api/workers/slots/${slotId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) fetchSlots();
+      else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Cannot delete slot.");
+      }
+    } catch {
+      alert("Network error.");
+    }
+  }
 
   const connectWs = useCallback((t, wid) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -169,13 +226,14 @@ export default function WorkerDashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => { 
+  useEffect(() => {
     if (token && worker) {
-      fetchData(); 
+      fetchData();
+      fetchSlots();
       const interval = setInterval(fetchData, 30000);
       return () => clearInterval(interval);
     }
-  }, [token, worker, fetchData]);
+  }, [token, worker, fetchData, fetchSlots]);
 
   useEffect(() => {
     if (token && worker) connectWs(token, worker.id);
@@ -264,14 +322,16 @@ export default function WorkerDashboard() {
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 px-2">My Workspace</p>
           <nav className="space-y-1">
             {[
+              { id: "my_schedule", label: "My Schedule", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
               { id: "start_work", label: "Start Work", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
               { id: "work_progress", label: "In Progress", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
               { id: "completed", label: "Completed", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
             ].map(item => {
-              const count = item.id === "start_work" ? jobs.filter(j => ['assigned', 'claimed'].includes(j.status) && (() => {
-                const { end } = calculateJobTimings(j);
-                return !end || currentTime <= end;
-              })()).length :
+              const count = item.id === "my_schedule" ? mySlots.filter(s => !s.is_booked).length :
+                            item.id === "start_work" ? jobs.filter(j => ['assigned', 'claimed'].includes(j.status) && (() => {
+                              const { end } = calculateJobTimings(j);
+                              return !end || currentTime <= end;
+                            })()).length :
                             item.id === "work_progress" ? jobs.filter(j => j.status === 'in_progress').length :
                             jobs.filter(j => j.status === 'completed').length;
               return (
@@ -448,7 +508,8 @@ export default function WorkerDashboard() {
               <div className="flex items-center justify-between mb-10">
            <div>
              <h2 className="text-3xl font-black text-slate-900 leading-tight">
-               {activeTab === "open_market" ? "Job Market" : 
+               {activeTab === "open_market" ? "Job Market" :
+                activeTab === "my_schedule" ? "My Schedule" :
                 activeTab === "start_work" ? "Assigned Jobs" :
                 activeTab === "work_progress" ? "Active Tasks" : "Job History"}
              </h2>
@@ -476,8 +537,113 @@ export default function WorkerDashboard() {
           </div>
         </div>
 
+        {/* ── My Schedule Tab ── */}
+        {activeTab === "my_schedule" && (
+          <div className="space-y-8 fade-in">
+            {/* Add New Slot Card */}
+            <div className="card-pro p-8 bg-white border-none shadow-xl">
+              <h3 className="text-base font-black text-slate-900 uppercase tracking-widest mb-6">Add Available Slot</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Date</label>
+                  <input
+                    type="date"
+                    min={new Date().toISOString().split("T")[0]}
+                    value={slotForm.slot_date}
+                    onChange={e => setSlotForm(f => ({ ...f, slot_date: e.target.value }))}
+                    className="w-full bg-slate-50 border-2 border-transparent rounded-xl px-4 py-3 font-bold text-slate-900 text-sm outline-none focus:border-primary transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Start Time</label>
+                  <select
+                    value={slotForm.start_time}
+                    onChange={e => setSlotForm(f => ({ ...f, start_time: e.target.value }))}
+                    className="w-full bg-slate-50 border-2 border-transparent rounded-xl px-4 py-3 font-bold text-slate-900 text-sm outline-none focus:border-primary transition-all"
+                  >
+                    {["06:00 AM","07:00 AM","08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM","01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM","06:00 PM","07:00 PM"].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">End Time</label>
+                  <select
+                    value={slotForm.end_time}
+                    onChange={e => setSlotForm(f => ({ ...f, end_time: e.target.value }))}
+                    className="w-full bg-slate-50 border-2 border-transparent rounded-xl px-4 py-3 font-bold text-slate-900 text-sm outline-none focus:border-primary transition-all"
+                  >
+                    {["07:00 AM","08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM","01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM","06:00 PM","07:00 PM","08:00 PM"].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {slotError && (
+                <p className="text-red-500 text-xs font-black mb-4 bg-red-50 rounded-xl px-4 py-2 border border-red-100">{slotError}</p>
+              )}
+              <button
+                onClick={addSlot}
+                disabled={slotSaving}
+                className="btn-pro btn-pro-primary px-8 py-3.5 text-sm shadow-lg shadow-emerald-900/20 disabled:opacity-50"
+              >
+                {slotSaving ? "Saving..." : "+ Add Slot"}
+              </button>
+            </div>
+
+            {/* Slots List */}
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">
+                Your Slots ({mySlots.length} total · {mySlots.filter(s => s.is_booked).length} booked)
+              </p>
+              {mySlots.length === 0 ? (
+                <div className="card-pro p-12 text-center text-slate-400">
+                  <LucideIcon d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                  <p className="font-black text-sm uppercase tracking-widest">No slots yet</p>
+                  <p className="text-xs mt-1">Add your available times above so clients can book you.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {mySlots.map(slot => (
+                    <div key={slot.id} className={`card-pro p-5 flex items-center justify-between gap-4 transition-all ${slot.is_booked ? 'bg-emerald-50 border border-emerald-100' : 'bg-white hover:shadow-md'}`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${slot.is_booked ? 'bg-emerald-500' : 'bg-slate-100'}`}>
+                          <LucideIcon
+                            d={slot.is_booked ? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" : "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"}
+                            className={`w-5 h-5 ${slot.is_booked ? 'text-white' : 'text-slate-500'}`}
+                          />
+                        </div>
+                        <div>
+                          <p className="font-black text-slate-900 text-sm">{slot.slot_date}</p>
+                          <p className="text-xs text-slate-400 font-bold">{slot.start_time} – {slot.end_time}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {slot.is_booked ? (
+                          <span className="badge badge-success text-[10px]">Booked by Client</span>
+                        ) : (
+                          <>
+                            <span className="badge badge-warning text-[10px]">Open</span>
+                            <button
+                              onClick={() => deleteSlot(slot.id)}
+                              className="p-2 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all"
+                              title="Remove slot"
+                            >
+                              <LucideIcon d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-6">
-          {filteredJobs.map(a => {
+          {activeTab !== "my_schedule" && filteredJobs.map(a => {
             const isCompleted = a.status === 'completed';
             const isMarket = activeTab === 'open_market';
             const hideSensitive = isCompleted || isMarket;
@@ -582,7 +748,7 @@ export default function WorkerDashboard() {
             );
           })}
 
-          {filteredJobs.length === 0 && (
+          {filteredJobs.length === 0 && activeTab !== "my_schedule" && (
             <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200">
                <LucideIcon d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" className="w-10 h-10 text-slate-200 mx-auto mb-4" />
                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Workspace is clear</p>
