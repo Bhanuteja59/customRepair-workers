@@ -6,8 +6,8 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const WS  = process.env.NEXT_PUBLIC_WS_URL  ?? "ws://localhost:8000";
 
 const STATUS_THEMES = {
-  open:        { label: "Wait for Admin", badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  pending:     { label: "Wait for Admin", badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  open:        { label: "OPEN MARKET",     badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  pending:     { label: "OPEN MARKET",     badge: "badge-warning",  icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   assigned:    { label: "New Job for You!", badge: "badge-info",     icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
   claimed:     { label: "Ready to Start",   badge: "badge-success",  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
   in_progress: { label: "Working Now",      badge: "badge-success",  icon: "M13 10V3L4 14h7v7l9-11h-7z" },
@@ -42,6 +42,7 @@ export default function WorkerDashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notification, setNotification] = useState(null);
+  const [showDebug, setShowDebug] = useState(false);
   const wsRef = useRef(null);
 
   // Helper to calculate timing requirements
@@ -90,13 +91,9 @@ export default function WorkerDashboard() {
     };
 
     if (activeTab === "open_market") {
-      return availableJobs.filter(a => {
-        const required = getSkills(a.booking?.service);
-        const workerSkills = worker.specializations || [];
-        // Support both old 'specialization' and new 'specializations' list
-        const techSkills = Array.isArray(workerSkills) ? workerSkills : [workerSkills];
-        return required.every(s => techSkills.includes(s));
-      });
+      // The backend already filters available jobs based on the worker's skills 
+      // and their specific availability time slots. We simply return them here.
+      return availableJobs;
     }
     if (activeTab === "start_work") return jobs.filter(j => ['assigned', 'claimed'].includes(j.status) && !isExpired(j));
     if (activeTab === "work_progress") return jobs.filter(j => j.status === 'in_progress');
@@ -209,7 +206,7 @@ export default function WorkerDashboard() {
             msg: `New ${booking?.service} request in ${booking?.user?.address?.split(',')[0]}`, data: data
           });
           setTimeout(() => setNotification(prev => prev?.id === (data.assignment_id || data.assignment?.id) ? null : prev), 15000);
-        } else if (data.type === "job_claimed") {
+        } else if (data.type === "job_status_update") {
           if (data.worker_id !== wid) {
             setAvailableJobs(prev => prev.filter(job => job.id !== data.assignment_id));
             setNotification(prev => prev?.id === data.assignment_id ? null : prev);
@@ -616,14 +613,21 @@ export default function WorkerDashboard() {
                         <div>
                           <p className="font-black text-slate-900 text-sm">{slot.slot_date}</p>
                           <p className="text-xs text-slate-400 font-bold">{slot.start_time} – {slot.end_time}</p>
+                          {slot.is_booked && slot.booking_service && (
+                            <p className="text-[10px] text-emerald-600 font-black uppercase tracking-tighter mt-1 truncate max-w-[150px]">
+                              {slot.booking_service} ({slot.client_name})
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        {slot.is_booked ? (
+                        {slot.is_booked && slot.booking_status && slot.booking_status !== 'pending' ? (
                           <span className="badge badge-success text-[10px]">Booked by Client</span>
                         ) : (
                           <>
-                            <span className="badge badge-warning text-[10px]">Open</span>
+                            <span className={`badge ${slot.is_booked && slot.booking_status === 'pending' ? 'badge-info' : 'badge-warning'} text-[10px]`}>
+                              {slot.is_booked && slot.booking_status === 'pending' ? 'Reserved' : 'Open'}
+                            </span>
                             <button
                               onClick={() => deleteSlot(slot.id)}
                               className="p-2 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all"
@@ -722,10 +726,10 @@ export default function WorkerDashboard() {
                     </div>
   
                     <div className="md:w-[200px] flex flex-col justify-end gap-3 pt-6 md:pt-0 md:border-l md:pl-6 border-slate-100">
-                       {activeTab === "open_market" && (
+                       {a.status === 'pending' && (
                           <button onClick={() => updateStatus(a.id, 'claimed')} className="btn-pro btn-pro-primary w-full shadow-emerald-100">Claim Job</button>
                        )}
-                       {a.status === 'assigned' && <button onClick={() => updateStatus(a.id, 'claimed')} className="btn-pro btn-pro-primary w-full">Confirm Job</button>}
+                       {a.status === 'assigned' && <button onClick={() => updateStatus(a.id, 'claimed')} className="btn-pro btn-pro-primary w-full shadow-blue-100">Confirm Job</button>}
                        
                        {a.status === 'claimed' && (
                          <div className="w-full">
@@ -748,10 +752,32 @@ export default function WorkerDashboard() {
             );
           })}
 
-          {filteredJobs.length === 0 && activeTab !== "my_schedule" && (
-            <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200">
-               <LucideIcon d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" className="w-10 h-10 text-slate-200 mx-auto mb-4" />
-               <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Workspace is clear</p>
+          {activeTab !== "my_schedule" && filteredJobs.length === 0 && !isRefreshing && (
+            <div className="card-pro p-20 flex flex-col items-center justify-center text-center mt-10 shadow-inner bg-slate-50 border-dashed border-2 border-slate-200">
+               <LucideIcon d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" className="w-16 h-16 text-slate-300 mb-6 drop-shadow-sm" />
+               <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400">Workspace is Clear</p>
+               <button 
+                onClick={() => setShowDebug(!showDebug)}
+                className="mt-6 text-[10px] font-bold text-slate-400 hover:text-primary transition-colors flex items-center gap-2"
+               >
+                 <LucideIcon d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 17c-.77 1.333.192 3 1.732 3z" className="w-3 h-3" />
+                 Troubleshoot Visibility
+               </button>
+               
+               {showDebug && (
+                 <div className="mt-8 p-4 bg-white/80 backdrop-blur border border-slate-200 text-slate-600 text-[10px] text-left rounded-2xl w-full max-w-md font-mono shadow-xl animate-fade-in">
+                   <p className="font-bold border-b border-slate-100 pb-2 mb-2 text-slate-400 tracking-widest uppercase">Diagnostic Report</p>
+                   <p className="mb-1"><span className="text-slate-400">Account:</span> {worker?.email}</p>
+                   <p className="mb-1"><span className="text-slate-400">Worker ID:</span> {worker?.id}</p>
+                   <p className="mb-1"><span className="text-slate-400">Active Trades:</span> {JSON.stringify(worker?.specializations)}</p>
+                   <p className="mb-1"><span className="text-slate-400">Lead Pool Size:</span> {availableJobs?.length}</p>
+                   <p className="mb-1"><span className="text-slate-400">Selected Tab:</span> {activeTab}</p>
+                   <p className="mt-4 text-[9px] text-slate-400 italic font-sans leading-relaxed">
+                     Jobs only appear if they match your exact Trades and your current Available Slots. 
+                     Check "My Schedule" to ensure you have open slots for the job dates.
+                   </p>
+                 </div>
+               )}
             </div>
           )}
         </div>
