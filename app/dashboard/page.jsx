@@ -3,7 +3,14 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const WS  = process.env.NEXT_PUBLIC_WS_URL  ?? "ws://localhost:8000";
+const getWS = () => {
+  const url = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && url.startsWith("ws:")) {
+    return url.replace("ws:", "wss:");
+  }
+  return url;
+};
+const WS = getWS();
 
 const STATUS_THEMES = {
   open:        { label: "OPEN MARKET",      badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
