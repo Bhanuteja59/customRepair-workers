@@ -1,16 +1,8 @@
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const getWS = () => {
-  const url = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
-  if (typeof window !== "undefined" && window.location.protocol === "https:" && url.startsWith("ws:")) {
-    return url.replace("ws:", "wss:");
-  }
-  return url;
-};
-const WS = getWS();
 
 const STATUS_THEMES = {
   open:        { label: "Pending Review",   badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
@@ -139,13 +131,11 @@ export default function WorkerDashboard() {
   const [slotForm, setSlotForm] = useState({ slot_date: "", start_time: "09:00 AM", end_time: "11:00 AM" });
   const [slotSaving, setSlotSaving] = useState(false);
   const [slotError, setSlotError] = useState("");
-  const [wsStatus, setWsStatus] = useState("idle");
+  const [availableJobs, setAvailableJobs] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notification, setNotification] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
-  const wsRef = useRef(null);
-
   const calculateJobTimings = (job) => {
     if (!job?.booking?.preferred_date) return { canStart: true, canComplete: true, start: null, end: null, label: null };
     const timeParts = job.booking.preferred_time?.split(/\s*[-\u2013]\s*/) || [];
@@ -239,38 +229,26 @@ export default function WorkerDashboard() {
     if (!token || !worker) return;
     setIsRefreshing(true);
     try {
-      const resMy = await fetch(`${API}/api/workers/jobs`, { headers: { Authorization: `Bearer ${token}` } });
+      const [resMy, resAvail] = await Promise.all([
+        fetch(`${API}/api/workers/jobs`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API}/api/workers/pending-jobs`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
       const myData = await resMy.json();
+      const availData = await resAvail.json();
       setJobs(Array.isArray(myData) ? myData : []);
+      setAvailableJobs(Array.isArray(availData) ? availData : []);
     } catch {} finally { setIsRefreshing(false); }
   }, [token, worker]);
 
-  const connectWs = useCallback((t, wid) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    setWsStatus("connecting");
-    const ws = new WebSocket(`${WS}/ws/worker/${wid}?token=${t}`);
-    wsRef.current = ws;
-    ws.onopen = () => setWsStatus("online");
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === "new_assignment") {
-          setNotification({ 
-            type: "assignment", id: data.assignment.id, 
-            title: data.title || "New Job Assigned!", 
-            msg: data.msg || `Auto-allocated: ${data.assignment.booking?.service}`, 
-            fullData: data.assignment 
-          });
-        }
-      } catch {}
-      fetchData();
-    };
-    ws.onclose = () => { setWsStatus("offline"); setTimeout(() => connectWs(t, wid), 3000); };
-  }, [fetchData]);
-
   useEffect(() => { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }, []);
-  useEffect(() => { if (token && worker) { fetchData(); fetchSlots(); const i = setInterval(fetchData, 30000); return () => clearInterval(i); } }, [token, worker, fetchData, fetchSlots]);
-  useEffect(() => { if (token && worker) connectWs(token, worker.id); return () => wsRef.current?.close(); }, [token, worker, connectWs]);
+  useEffect(() => {
+    if (token && worker) {
+      fetchData();
+      fetchSlots();
+      const i = setInterval(fetchData, 10000);
+      return () => clearInterval(i);
+    }
+  }, [token, worker, fetchData, fetchSlots]);
 
   async function addSlot() {
     if (!slotForm.slot_date || !slotForm.start_time || !slotForm.end_time) { setSlotError("Please fill in all fields."); return; }
@@ -383,7 +361,7 @@ export default function WorkerDashboard() {
             <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.25em] leading-none mt-0.5">Worker Hub</p>
           </div>
           <div className="ml-auto">
-            <div className={`w-2 h-2 rounded-full ${wsStatus === "online" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-slate-600"}`} />
+            <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
           </div>
         </div>
 
@@ -492,9 +470,8 @@ export default function WorkerDashboard() {
           <div>
             <h2 className="text-xl font-black text-slate-900">{tabTitle[activeTab] || "Dashboard"}</h2>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className={`inline-flex h-1.5 w-1.5 rounded-full ${wsStatus === "online" ? "bg-emerald-400" : "bg-slate-300"}`} />
-              <span className={`inline-flex h-1.5 w-1.5 rounded-full animate-ping absolute ${wsStatus === "online" ? "bg-emerald-400" : "bg-transparent"}`} />
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{wsStatus} real-time sync</span>
+              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Auto-refresh</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
