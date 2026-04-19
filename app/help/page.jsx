@@ -14,7 +14,7 @@ const FAQ = [
   { q: "How do I get assigned to a job?", a: "Add availability slots in 'My Schedule', then set your trade specializations in your Profile. The dispatcher matches open bookings to workers with matching skills and time slots." },
   { q: "When can I start a job?", a: "You can tap 'Start Work' only during the job's scheduled time window. The button activates when the booking start time is reached." },
   { q: "How do I finish a job early?", a: "The 'Finish Work' button activates 30 minutes before the end of the scheduled slot. This prevents premature completions." },
-  { q: "Why don't I see jobs in the Open Market?", a: "Open Market jobs only show when they match your listed trades AND your available schedule slots. Ensure your Profile and Schedule are up to date." },
+  { q: "How are jobs assigned to me?", a: "Our system automatically matches technicians based on workload and skill. The technician with the least total jobs and an available slot for the requested time is chosen automatically." },
   { q: "How are my earnings calculated?", a: "Earnings are estimated based on service type. You receive 75% of the job rate. Exact rates may vary — check the Earnings page for your breakdown." },
   { q: "What happens if I miss a job slot?", a: "Missed slots are marked as 'Expired'. Your profile score may be affected. Contact dispatch if you have an emergency." },
   { q: "How do I update my phone number?", a: "Go to Settings → Profile & Identity and update your phone number there." },

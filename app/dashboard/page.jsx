@@ -13,12 +13,13 @@ const getWS = () => {
 const WS = getWS();
 
 const STATUS_THEMES = {
-  open:        { label: "OPEN MARKET",      badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  pending:     { label: "OPEN MARKET",      badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  assigned:    { label: "New Job for You!", badge: "badge-info",    icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
-  claimed:     { label: "Ready to Start",   badge: "badge-success", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  open:        { label: "Pending Review",   badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  pending:     { label: "Evaluating",       badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  assigned:    { label: "New Assignment", badge: "badge-info",    icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
+  claimed:     { label: "Job Confirmed",  badge: "badge-success", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
   in_progress: { label: "Working Now",      badge: "badge-success", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
   completed:   { label: "Done!",            badge: "badge-info",    icon: "M5 13l4 4L19 7" },
+  not_completed: { label: "Unfinished",      badge: "badge-danger",  icon: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 17c-.77 1.333.192 3 1.732 3z" },
   expired:     { label: "Missed Slot",      badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
 };
 
@@ -133,7 +134,6 @@ export default function WorkerDashboard() {
   const [activeTab, setActiveTab] = useState("start_work");
   const [profileForm, setProfileForm] = useState(null);
   const [jobs, setJobs] = useState([]);
-  const [availableJobs, setAvailableJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [mySlots, setMySlots] = useState([]);
   const [slotForm, setSlotForm] = useState({ slot_date: "", start_time: "09:00 AM", end_time: "11:00 AM" });
@@ -153,7 +153,7 @@ export default function WorkerDashboard() {
     const start = new Date(`${job.booking.preferred_date} ${timeParts[0]}`);
     const end   = new Date(`${job.booking.preferred_date} ${timeParts[1]}`);
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return { canStart: true, canComplete: true, start: null, end: null, label: null };
-    const canStart    = currentTime >= start && currentTime < end;
+    const canStart    = currentTime >= new Date(start.getTime() - 30 * 60000) && currentTime < end;
     const canComplete = currentTime >= new Date(end.getTime() - 30 * 60000);
     let label = null;
     if (currentTime < start) {
@@ -178,20 +178,20 @@ export default function WorkerDashboard() {
   };
 
   const getFilteredJobs = () => {
-    const isExpired = (a) => { const { end } = calculateJobTimings(a); return end ? currentTime > end : false; };
-    if (activeTab === "open_market")   return availableJobs;
-    if (activeTab === "start_work")    return jobs.filter(j => ["assigned","claimed"].includes(j.status) && !isExpired(j));
-    if (activeTab === "work_progress") return jobs.filter(j => j.status === "in_progress");
-    if (activeTab === "completed")     return jobs.filter(j => j.status === "completed");
+    const jList = jobs || [];
+    if (activeTab === "open_market") return (availableJobs || []);
+    if (activeTab === "start_work")  return jList.filter(j => ["assigned", "claimed"].includes(j.status));
+    if (activeTab === "work_progress") return jList.filter(j => j.status === "in_progress");
+    if (activeTab === "completed")     return jList.filter(j => j.status === "completed" || j.status === "not_completed");
     return [];
   };
 
   const filteredJobs = getFilteredJobs();
 
   // ── Analytics data ────────────────────────────────────────────────────────
-  const completedJobs  = jobs.filter(j => j.status === "completed");
-  const inProgressJobs = jobs.filter(j => j.status === "in_progress");
-  const pendingJobs    = jobs.filter(j => ["assigned","claimed"].includes(j.status));
+  const completedJobs  = (jobs || []).filter(j => j.status === "completed");
+  const inProgressJobs = (jobs || []).filter(j => j.status === "in_progress");
+  const pendingJobs    = (jobs || []).filter(j => ["assigned","claimed"].includes(j.status));
 
   const last7Days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d;
@@ -201,7 +201,7 @@ export default function WorkerDashboard() {
     l: dayLabels[d.getDay()],
     v: completedJobs.filter(j => {
       if (!j.booking?.preferred_date) return false;
-      return new Date(j.booking.preferred_date).toDateString() === d.toDateString();
+      try { return new Date(j.booking.preferred_date).toDateString() === d.toDateString(); } catch { return false; }
     }).length,
   }));
 
@@ -214,7 +214,7 @@ export default function WorkerDashboard() {
 
   const slotsByDay = last7Days.map(d => ({
     l: dayLabels[d.getDay()],
-    v: mySlots.filter(s => s.slot_date === d.toISOString().split("T")[0]).length,
+    v: (mySlots || []).filter(s => s.slot_date === d.toISOString().split("T")[0]).length,
     color: "#6366f1",
   }));
 
@@ -239,14 +239,9 @@ export default function WorkerDashboard() {
     if (!token || !worker) return;
     setIsRefreshing(true);
     try {
-      const [resMy, resAll] = await Promise.all([
-        fetch(`${API}/api/workers/jobs`,         { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/api/workers/pending-jobs`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-      const myData  = await resMy.json();
-      const allData = await resAll.json();
-      setJobs(Array.isArray(myData)  ? myData  : []);
-      setAvailableJobs(Array.isArray(allData) ? allData : []);
+      const resMy = await fetch(`${API}/api/workers/jobs`, { headers: { Authorization: `Bearer ${token}` } });
+      const myData = await resMy.json();
+      setJobs(Array.isArray(myData) ? myData : []);
     } catch {} finally { setIsRefreshing(false); }
   }, [token, worker]);
 
@@ -260,16 +255,12 @@ export default function WorkerDashboard() {
       try {
         const data = JSON.parse(e.data);
         if (data.type === "new_assignment") {
-          setNotification({ type: "assignment", id: data.assignment.id, title: "Direct Assignment!", msg: `Admin assigned you: ${data.assignment.booking?.service}`, data: data.assignment });
-        } else if (data.type === "new_lead" || data.type === "new_booking") {
-          const booking = data.booking || data.assignment?.booking;
-          setNotification({ type: "lead", id: data.assignment_id || data.assignment?.id, title: "New Local Lead!", msg: `New ${booking?.service} request in ${booking?.user?.address?.split(",")[0]}`, data });
-          setTimeout(() => setNotification(prev => prev?.id === (data.assignment_id || data.assignment?.id) ? null : prev), 15000);
-        } else if (data.type === "job_status_update") {
-          if (data.worker_id !== wid) {
-            setAvailableJobs(prev => prev.filter(job => job.id !== data.assignment_id));
-            setNotification(prev => prev?.id === data.assignment_id ? null : prev);
-          }
+          setNotification({ 
+            type: "assignment", id: data.assignment.id, 
+            title: data.title || "New Job Assigned!", 
+            msg: data.msg || `Auto-allocated: ${data.assignment.booking?.service}`, 
+            fullData: data.assignment 
+          });
         }
       } catch {}
       fetchData();
@@ -313,9 +304,10 @@ export default function WorkerDashboard() {
       });
       if (res.ok) { fetchData(); if (status === "claimed") setNotification(null); }
       else {
-        const errData = await res.json().catch(() => null);
-        if (errData?.success === false) alert(errData.message);
-        else if (errData?.detail) alert(errData.detail);
+        const errData = await res.json().catch(() => ({}));
+        if (errData?.success === false) alert(errData.message || "Operation failed.");
+        else if (errData?.detail) alert(typeof errData.detail === "string" ? errData.detail : JSON.stringify(errData.detail));
+        else alert("Server error: Status " + res.status);
       }
     } catch {}
   }
@@ -343,17 +335,17 @@ export default function WorkerDashboard() {
   // ── Nav items ─────────────────────────────────────────────────────────────
   const workspaceItems = [
     { id: "my_schedule",   label: "My Schedule",   icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
-    { id: "start_work",    label: "Start Work",    icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+    { id: "start_work",    label: "Assigned Jobs", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
     { id: "work_progress", label: "In Progress",   icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
     { id: "completed",     label: "Completed",     icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
     { id: "analytics",     label: "Analytics",     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   ];
 
   const getBadge = (id) => {
-    if (id === "my_schedule")   return mySlots.filter(s => !s.is_booked).length;
-    if (id === "start_work")    return pendingJobs.filter(j => { const { end } = calculateJobTimings(j); return !end || currentTime <= end; }).length;
-    if (id === "work_progress") return inProgressJobs.length;
-    if (id === "completed")     return completedJobs.length;
+    if (id === "my_schedule")   return (mySlots || []).filter(s => !s.is_booked).length;
+    if (id === "start_work")    return (jobs || []).filter(j => ["assigned", "claimed"].includes(j.status)).length;
+    if (id === "work_progress") return (jobs || []).filter(j => j.status === "in_progress").length;
+    if (id === "completed")     return (jobs || []).filter(j => j.status === "completed" || j.status === "not_completed").length;
     return 0;
   };
 
@@ -369,8 +361,11 @@ export default function WorkerDashboard() {
   ];
 
   const tabTitle = {
-    open_market: "Job Market", my_schedule: "My Schedule", start_work: "Assigned Jobs",
-    work_progress: "Active Tasks", completed: "Job History", analytics: "Performance Analytics",
+    my_schedule: "My Schedule", 
+    start_work: "Assigned Jobs",
+    work_progress: "Active Tasks", 
+    completed: "Job History", 
+    analytics: "Performance Analytics",
     profile: "My Settings",
   };
 
@@ -405,26 +400,6 @@ export default function WorkerDashboard() {
 
         <div className="flex-1 px-4 py-4 space-y-5">
 
-          {/* LIVE DISPATCH */}
-          <div>
-            <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.25em] px-2 mb-2">Live Dispatch</p>
-            <button
-              onClick={() => setActiveTab("open_market")}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                activeTab === "open_market" ? "bg-emerald-600 text-white shadow-xl shadow-emerald-900/30" : "text-slate-400 hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <LucideIcon d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                Open Market
-              </div>
-              {availableJobs.length > 0 && (
-                <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg ${activeTab === "open_market" ? "bg-white/20 text-white" : "bg-emerald-600/20 text-emerald-400"}`}>
-                  {availableJobs.length}
-                </span>
-              )}
-            </button>
-          </div>
 
           {/* MY WORKSPACE */}
           <div>
@@ -540,8 +515,7 @@ export default function WorkerDashboard() {
 
           {/* ── KPI bar (always visible except profile) ── */}
           {activeTab !== "profile" && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 fade-in">
-              <KpiCard label="Open Market"  value={availableJobs.length}  icon="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" color="amber" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 fade-in">
               <KpiCard label="Assigned"     value={pendingJobs.length}   icon="M13 10V3L4 14h7v7l9-11h-7z"  color="blue" />
               <KpiCard label="In Progress"  value={inProgressJobs.length} icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" color="purple" />
               <KpiCard label="Completed"    value={completedJobs.length}  icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" color="emerald" />
@@ -884,12 +858,43 @@ export default function WorkerDashboard() {
                       </div>
 
                       <div className="md:w-[190px] flex flex-col justify-end gap-2.5 pt-4 md:pt-0 md:border-l md:pl-6 border-slate-100 shrink-0">
-                        {a.status === "pending"     && <button onClick={e => { e.stopPropagation(); updateStatus(a.id, "claimed"); }} className="btn-pro btn-pro-primary w-full">Claim Job</button>}
-                        {a.status === "assigned"    && <button onClick={e => { e.stopPropagation(); updateStatus(a.id, "claimed"); }} className="btn-pro btn-pro-primary w-full">Confirm Job</button>}
-                        {a.status === "claimed"     && (
-                          <div>
-                            {label && <p className="text-[9px] font-bold text-slate-400 text-center mb-1 uppercase">{label}</p>}
-                            <button onClick={e => { e.stopPropagation(); updateStatus(a.id, "in_progress"); }} disabled={!canStart} className="btn-pro btn-pro-primary w-full disabled:opacity-40 disabled:cursor-not-allowed">Start Work</button>
+                        {(a.status === "claimed" || a.status === "assigned") && (
+                          <div className="space-y-2">
+                            {(() => {
+                              const { canStart, label: timeLabel } = calculateJobTimings(a);
+                              return (
+                                <>
+                                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl py-3 px-2 text-center mb-1">
+                                      <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest leading-none">Auto Allotted</p>
+                                      <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">{timeLabel || "Direct Assignment"}</p>
+                                  </div>
+                                  
+                                  <button 
+                                    onClick={e => { e.stopPropagation(); updateStatus(a.id, "in_progress"); }}
+                                    disabled={!canStart}
+                                    className="btn-pro btn-pro-primary w-full shadow-lg shadow-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:!bg-slate-300 disabled:!shadow-none disabled:!border-slate-200">
+                                    {canStart ? "Start Work Now" : "Waiting for Slot"}
+                                  </button>
+                                  
+                                  {(() => {
+                                    try {
+                                      if (!a.booking?.preferred_time) return null;
+                                      const startTimePart = a.booking.preferred_time.split(/\s*[-\u2013]\s*/)[0].trim();
+                                      const startDt = new Date(`${a.booking.preferred_date} ${startTimePart}`);
+                                      if (!canStart && new Date() < new Date(startDt.getTime() - 24 * 60 * 60 * 1000)) {
+                                        return (
+                                          <button onClick={e => { e.stopPropagation(); updateStatus(a.id, "rejected"); }}
+                                            className="w-full py-2.5 rounded-xl border-2 border-red-50 text-red-400 font-bold hover:bg-red-50 transition-all text-[10px] uppercase tracking-widest">
+                                            Cancel Allotment
+                                          </button>
+                                        );
+                                      }
+                                    } catch(e) {}
+                                    return null;
+                                  })()}
+                                </>
+                              );
+                            })()}
                           </div>
                         )}
                         {a.status === "in_progress" && (
@@ -946,12 +951,12 @@ export default function WorkerDashboard() {
                 <div className="flex items-center gap-2">
                   {["assignment","lead"].includes(notification.type) ? (
                     <>
-                      <button onClick={() => updateStatus(notification.id, "claimed")} className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-widest ${notification.type === "assignment" ? "bg-blue-600 hover:bg-blue-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
-                        {notification.type === "assignment" ? "Accept" : "Claim"}
+                      <button onClick={() => { setSelectedJob(notification.fullData); setNotification(null); }} className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-widest ${notification.type === "assignment" ? "bg-blue-600 hover:bg-blue-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
+                        View Details
                       </button>
-                      <button onClick={() => { if (notification.type === "assignment") updateStatus(notification.id, "rejected"); setNotification(null); }}
+                      <button onClick={() => { updateStatus(notification.id, "rejected"); setNotification(null); }}
                         className="px-3 py-2.5 rounded-xl text-xs font-black text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
-                        {notification.type === "assignment" ? "Reject" : "Dismiss"}
+                        Cancel
                       </button>
                     </>
                   ) : (
@@ -1020,13 +1025,43 @@ export default function WorkerDashboard() {
               <div className="pt-4 border-t border-slate-100 space-y-3">
                 {(() => {
                   const { canStart, canComplete, label } = calculateJobTimings(selectedJob);
-                  if (["open_market","pending","assigned"].includes(selectedJob.status))
-                    return <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "claimed"); setSelectedJob(null); }} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10">Accept & Claim This Job</button>;
+                  
+                  // Calculate if cancellation is allowed (Strict 24h Deadline)
+                  let canCancel = true;
+                  if (selectedJob.booking?.preferred_time) {
+                    try {
+                      const startTimePart = selectedJob.booking.preferred_time.split(/\s*[-\u2013]\s*/)[0].trim();
+                      const startDt = new Date(`${selectedJob.booking.preferred_date} ${startTimePart}`);
+                      const deadlineDt = new Date(startDt.getTime() - 24 * 60 * 60 * 1000);
+                      if (new Date() >= deadlineDt) canCancel = false;
+                    } catch(e) {}
+                  }
+
+                  if (selectedJob.status === "pending")
+                    return <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "claimed"); setSelectedJob(null); }} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10">Claim This Job</button>;
+
                   if (selectedJob.status === "claimed")
-                    return <div className="space-y-2">{label && <p className="text-center text-xs font-black uppercase text-amber-500 animate-pulse">{label}</p>}<button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "in_progress"); setSelectedJob(null); }} disabled={!canStart} className="btn-pro btn-pro-primary w-full !py-4 text-base disabled:opacity-40 disabled:grayscale">Start On-Site Work</button></div>;
+                    return (
+                      <div className="space-y-4">
+                        <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "in_progress"); setSelectedJob(null); }} disabled={!canStart} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10 disabled:opacity-50">Confirm Arrival & Start Work</button>
+                        {canCancel && (
+                           <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "rejected"); setSelectedJob(null); }} className="w-full py-4 rounded-2xl border-2 border-red-50 text-red-500 font-black hover:bg-red-50 transition-all text-sm">Cancel Allotment</button>
+                        )}
+                        {!canCancel && <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 py-3 rounded-2xl border border-slate-100">🚫 Cancellation Locked (Under 24h left)</p>}
+                        <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Mark as Could Not Complete</button>
+                      </div>
+                    );
                   if (selectedJob.status === "in_progress")
-                    return <div className="space-y-2">{!canComplete && <p className="text-center text-xs font-bold text-slate-400 uppercase">Wait until near end of slot</p>}<button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "completed"); setSelectedJob(null); }} disabled={!canComplete} className="btn-pro btn-pro-primary w-full !bg-sky-600 hover:!bg-sky-700 !py-4 text-base disabled:opacity-40">Mark as Successfully Completed</button></div>;
-                  return <div className="text-center py-3 bg-emerald-50 rounded-2xl border border-emerald-100"><p className="text-emerald-600 font-black uppercase tracking-widest text-xs">Service Ticket Closed</p></div>;
+                    return (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                           {!canComplete && <p className="text-center text-xs font-bold text-slate-400 uppercase">Wait until near end of slot</p>}
+                           <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "completed"); setSelectedJob(null); }} disabled={!canComplete} className="btn-pro btn-pro-primary w-full !bg-sky-600 hover:!bg-sky-700 !py-4 text-base disabled:opacity-40">Mark as Successfully Completed</button>
+                        </div>
+                        <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Job Not Completed</button>
+                      </div>
+                    );
+                  return <div className="text-center py-3 bg-emerald-50 rounded-2xl border border-emerald-100"><p className="text-emerald-600 font-black uppercase tracking-widest text-xs">Service Ticket Finalized</p></div>;
                 })()}
                 <button onClick={() => setSelectedJob(null)} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-700 transition-colors py-2">Dismiss Details</button>
               </div>
