@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 export default function SettingsRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/dashboard");
+    router.replace("/dashboard?tab=settings");
   }, [router]);
   return null;
 }

@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -90,8 +90,11 @@ function KpiCard({ label, value, icon, color = "emerald", sub }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function WorkerDashboard() {
+function DashboardContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+
   const [worker, setWorker] = useState(null);
   const [token, setToken] = useState(null);
   const [activeTab, setActiveTab] = useState("start_work");
@@ -119,6 +122,12 @@ export default function WorkerDashboard() {
   const [ticketSubmitted, setTicketSubmitted] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (tabParam && ["my_schedule", "start_work", "work_progress", "completed", "settings", "help", "profile", "earnings"].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
 
   const calculateJobTimings = (job) => {
     if (!job?.booking?.preferred_date) return { canStart: true, canComplete: true, start: null, end: null, label: null };
@@ -186,11 +195,7 @@ export default function WorkerDashboard() {
     color: serviceColors[s],
   }));
 
-  const slotsByDay = last7Days.map(d => ({
-    l: dayLabels[d.getDay()],
-    v: (mySlots || []).filter(s => s.slot_date === d.toISOString().split("T")[0]).length,
-    color: "#6366f1",
-  }));
+
 
   // ── Auth & data fetching ──────────────────────────────────────────────────
   useEffect(() => {
@@ -198,18 +203,24 @@ export default function WorkerDashboard() {
     const w = localStorage.getItem("worker_data");
     if (!t || !w) { router.replace("/login"); return; }
     setToken(t);
-    const wObj = JSON.parse(w);
-    setWorker(wObj);
-    setProfileForm({
-      name: wObj.name || "",
-      phone: wObj.phone || "",
-      email: wObj.email || "",
-      specializations: wObj.specializations || []
-    });
-    // Load preferences from DB
-    if (wObj.notif_prefs) setNotifPrefs(wObj.notif_prefs);
-    if (wObj.sched_prefs) setSchedPrefs(wObj.sched_prefs);
-    if (wObj.privacy_prefs) setPrivacyPrefs(wObj.privacy_prefs);
+    try {
+      const wObj = JSON.parse(w);
+      setWorker(wObj);
+      setProfileForm({
+        name: wObj.name || "",
+        phone: wObj.phone || "",
+        email: wObj.email || "",
+        specializations: wObj.specializations || []
+      });
+      // Load preferences from DB
+      if (wObj.notif_prefs) setNotifPrefs(wObj.notif_prefs);
+      if (wObj.sched_prefs) setSchedPrefs(wObj.sched_prefs);
+      if (wObj.privacy_prefs) setPrivacyPrefs(wObj.privacy_prefs);
+    } catch (e) {
+      console.error("Failed to parse worker data", e);
+      localStorage.clear();
+      router.replace("/login");
+    }
   }, [router]);
 
   const fetchSlots = useCallback(async () => {
@@ -316,6 +327,7 @@ export default function WorkerDashboard() {
   // ── Nav items ─────────────────────────────────────────────────────────────
   const workspaceItems = [
     { id: "my_schedule", label: "My Schedule", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
+    { id: "earnings", label: "Earnings & Analytics", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
     { id: "start_work", label: "Assigned Jobs", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
     { id: "work_progress", label: "In Progress", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
     { id: "completed", label: "Completed", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
@@ -339,7 +351,7 @@ export default function WorkerDashboard() {
     my_schedule: "My Schedule",
     start_work: "Assigned Jobs",
     work_progress: "Active Tasks",
-    completed: "Job History",
+    earnings: "Earnings & Analytics",
     settings: "System Settings",
     help: "Help & Support",
     profile: "My Profile",
@@ -470,11 +482,132 @@ export default function WorkerDashboard() {
         <div className="p-8 max-w-6xl mx-auto">
 
           {/* ── KPI bar ── */}
-          {(activeTab !== "settings" && activeTab !== "help" && activeTab !== "profile") && (
+          {(activeTab !== "settings" && activeTab !== "help" && activeTab !== "profile" && activeTab !== "earnings") && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 fade-in">
               <KpiCard label="Assigned" value={pendingJobs.length} icon="M13 10V3L4 14h7v7l9-11h-7z" color="blue" />
               <KpiCard label="In Progress" value={inProgressJobs.length} icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" color="purple" />
               <KpiCard label="Completed" value={completedJobs.length} icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" color="emerald" />
+            </div>
+          )}
+
+
+          {/* ── EARNINGS TAB ── */}
+          {activeTab === "earnings" && (
+            <div className="space-y-8 fade-in">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <KpiCard label="Total Revenue" value={`$${(completedJobs.length * 85).toLocaleString()}`} icon="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" color="emerald" sub="Estimated base" />
+                <KpiCard label="Efficiency" value={`${Math.round((completedJobs.length / (jobs.length || 1)) * 100)}%`} icon="M13 10V3L4 14h7v7l9-11h-7z" color="blue" sub="Completion rate" />
+                <KpiCard label="Avg/Job" value="$85.00" icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" color="purple" sub="Standard rate" />
+                <KpiCard label="Next Payout" value={`$${(completedJobs.length * 85 * 0.8).toFixed(2)}`} icon="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" color="amber" sub="Net after fees" />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Weekly Volume Chart */}
+                <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
+                  <div className="flex items-center justify-between mb-8">
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Weekly Performance</h4>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Completed jobs by day</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <div className="w-2 h-2 rounded-full bg-slate-200" />
+                    </div>
+                  </div>
+                  <div className="flex items-end justify-between h-48 gap-2 px-2">
+                    {jobsByDay.map((d, i) => {
+                      const max = Math.max(...jobsByDay.map(x => x.v), 1);
+                      const height = (d.v / max) * 100;
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-3 group">
+                          <div className="relative w-full flex flex-col justify-end h-full">
+                            <div
+                              style={{ height: `${height}%` }}
+                              className="w-full bg-slate-50 rounded-t-lg group-hover:bg-emerald-500 transition-all duration-500 relative overflow-hidden"
+                            >
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
+                            </div>
+                            {d.v > 0 && (
+                              <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="bg-slate-900 text-white text-[10px] font-black px-2 py-1 rounded-md">{d.v}</span>
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{d.l}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Service Breakdown */}
+                <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
+                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8">Trade Breakdown</h4>
+                  <div className="space-y-6">
+                    {jobsByService.map((s, i) => {
+                      const total = completedJobs.length || 1;
+                      const pct = Math.round((s.v / total) * 100);
+                      return (
+                        <div key={i} className="space-y-2">
+                          <div className="flex justify-between items-end">
+                            <p className="text-xs font-black text-slate-700 uppercase tracking-tight">{s.l}</p>
+                            <p className="text-[10px] font-bold text-slate-400">{s.v} jobs ({pct}%)</p>
+                          </div>
+                          <div className="h-2.5 w-full bg-slate-50 rounded-full overflow-hidden">
+                            <div
+                              style={{ width: `${pct}%`, backgroundColor: s.color }}
+                              className="h-full rounded-full shadow-[0_0_8px_rgba(0,0,0,0.05)] transition-all duration-1000"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Transactions Table */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-slate-50 flex items-center justify-between">
+                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Recent Payouts</h4>
+                  <button className="text-[10px] font-black text-emerald-600 uppercase tracking-widest hover:text-emerald-700 transition-colors">Export CSV</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50/50">
+                      <tr>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Job Type</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Client</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {completedJobs.slice(0, 5).map((j, i) => (
+                        <tr key={i} className="hover:bg-slate-50/30 transition-colors">
+                          <td className="px-6 py-4">
+                        <p className="text-xs font-bold text-slate-900">{j.booking?.preferred_date ? new Date(j.booking.preferred_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBD"}</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="text-xs font-black text-slate-700 capitalize">{j.booking?.service}</span>
+                          </td>
+                          <td className="px-6 py-4 text-xs font-bold text-slate-500">{j.booking?.user?.name}</td>
+                          <td className="px-6 py-4 text-xs font-black text-slate-900">$85.00</td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase tracking-widest border border-emerald-100">Settled</span>
+                          </td>
+                        </tr>
+                      ))}
+                      {completedJobs.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="px-6 py-12 text-center text-slate-400 font-bold text-xs">No transaction history yet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1010,121 +1143,119 @@ export default function WorkerDashboard() {
         </div>
       )}
 
-          {/* ── Job Detail Modal ─────────────────────────────────────────────── */}
-          {selectedJob && (
-            <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-fade-in" onClick={() => setSelectedJob(null)}>
-              <div className="bg-white w-full max-w-2xl rounded-[36px] shadow-2xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
-                <div className="bg-slate-900 p-8 text-white flex justify-between items-start relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[80px]" />
-                  <div className="relative z-10">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className={`badge ${STATUS_THEMES[selectedJob.status]?.badge || "badge-info"} !bg-white/10 !text-white border-white/20`}>{STATUS_THEMES[selectedJob.status]?.label || selectedJob.status}</span>
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">#{selectedJob.booking?.id?.split("-")[0]}</span>
-                    </div>
-                    <h2 className="text-3xl font-black capitalize leading-none">{selectedJob.booking?.service}</h2>
-                    <p className="text-slate-400 font-bold mt-3 text-sm flex items-center gap-2">
-                      <LucideIcon d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" className="w-4 h-4" />
-                      {selectedJob.booking?.preferred_date} · {selectedJob.booking?.preferred_time}
-                    </p>
-                  </div>
-                  <button onClick={() => setSelectedJob(null)} className="relative z-10 p-2.5 hover:bg-white/10 rounded-2xl transition-all">
-                    <LucideIcon d="M6 18L18 6M6 6l12 12" className="w-5 h-5" />
-                  </button>
+      {/* ── Job Detail Modal ─────────────────────────────────────────────── */}
+      {selectedJob && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-fade-in" onClick={() => setSelectedJob(null)}>
+          <div className="bg-white w-full max-w-2xl rounded-[36px] shadow-2xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="bg-slate-900 p-8 text-white flex justify-between items-start relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[80px]" />
+              <div className="relative z-10">
+                <div className="flex items-center gap-3 mb-3">
+                  <span className={`badge ${STATUS_THEMES[selectedJob.status]?.badge || "badge-info"} !bg-white/10 !text-white border-white/20`}>{STATUS_THEMES[selectedJob.status]?.label || selectedJob.status}</span>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">#{selectedJob.booking?.id?.split("-")[0]}</span>
                 </div>
+                <h2 className="text-3xl font-black capitalize leading-none">{selectedJob.booking?.service}</h2>
+                <p className="text-slate-400 font-bold mt-3 text-sm flex items-center gap-2">
+                  <LucideIcon d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" className="w-4 h-4" />
+                  {selectedJob.booking?.preferred_date} · {selectedJob.booking?.preferred_time}
+                </p>
+              </div>
+              <button onClick={() => setSelectedJob(null)} className="relative z-10 p-2.5 hover:bg-white/10 rounded-2xl transition-all">
+                <LucideIcon d="M6 18L18 6M6 6l12 12" className="w-5 h-5" />
+              </button>
+            </div>
 
-                <div className="p-8 space-y-6 max-h-[65vh] overflow-y-auto custom-scrollbar">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="p-8 space-y-6 max-h-[65vh] overflow-y-auto custom-scrollbar">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Customer</p>
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-900 font-black text-xl">{selectedJob.booking?.user?.name?.charAt(0)}</div>
                     <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Customer</p>
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-900 font-black text-xl">{selectedJob.booking?.user?.name?.charAt(0)}</div>
-                        <div>
-                          <p className="text-lg font-black text-slate-900">{selectedJob.booking?.user?.name}</p>
-                          <p className="text-sm font-bold text-emerald-600 mt-0.5">{selectedJob.booking?.user?.phone}</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Service Location</p>
-                      <div className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
-                        <LucideIcon d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
-                        <p className="text-sm font-bold text-slate-700 leading-relaxed">{selectedJob.booking?.user?.address || "Not specified"}</p>
-                      </div>
+                      <p className="text-lg font-black text-slate-900">{selectedJob.booking?.user?.name}</p>
+                      <p className="text-sm font-bold text-emerald-600 mt-0.5">{selectedJob.booking?.user?.phone}</p>
                     </div>
                   </div>
-
-                  {selectedJob.booking?.notes && (
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Job Directives</p>
-                      <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-100">
-                        <p className="text-sm font-medium text-slate-700 italic">"{selectedJob.booking.notes}"</p>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="pt-4 border-t border-slate-100 space-y-3">
-                    {(() => {
-                      const { canStart, canComplete, label } = calculateJobTimings(selectedJob);
-
-                      // Calculate if cancellation is allowed (Strict 24h Deadline)
-                      let canCancel = true;
-                      if (selectedJob.booking?.preferred_time) {
-                        try {
-                          const startTimePart = selectedJob.booking.preferred_time.split(/\s*[–-]\s*/)[0].trim();
-                          const startDt = new Date(`${selectedJob.booking.preferred_date} ${startTimePart}`);
-                          const deadlineDt = new Date(startDt.getTime() - 24 * 60 * 60 * 1000);
-                          if (new Date() >= deadlineDt) canCancel = false;
-                        } catch (e) { }
-                      }
-
-                      if (selectedJob.status === "pending")
-                        return <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "claimed"); setSelectedJob(null); }} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10">Claim This Job</button>;
-
-                      if (selectedJob.status === "claimed")
-                        return (
-                          <div className="space-y-4">
-                            <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "in_progress"); setSelectedJob(null); }} disabled={!canStart} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10 disabled:opacity-50">Confirm Arrival & Start Work</button>
-                            {canCancel && (
-                              <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "rejected"); setSelectedJob(null); }} className="w-full py-4 rounded-2xl border-2 border-red-50 text-red-500 font-black hover:bg-red-50 transition-all text-sm">Cancel Allotment</button>
-                            )}
-                            {!canCancel && <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 py-3 rounded-2xl border border-slate-100">🚫 Cancellation Locked (Under 24h left)</p>}
-                            <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Mark as Could Not Complete</button>
-                          </div>
-                        );
-                      if (selectedJob.status === "in_progress")
-                        return (
-                          <div className="space-y-4">
-                            <div className="space-y-2">
-                              {!canComplete && <p className="text-center text-xs font-bold text-slate-400 uppercase">Wait until near end of slot</p>}
-                              <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "completed"); setSelectedJob(null); }} disabled={!canComplete} className="btn-pro btn-pro-primary w-full !bg-sky-600 hover:!bg-sky-700 !py-4 text-base disabled:opacity-40">Mark as Successfully Completed</button>
-                            </div>
-                            <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Job Not Completed</button>
-                          </div>
-                        );
-                      return <div className="text-center py-3 bg-emerald-50 rounded-2xl border border-emerald-100"><p className="text-emerald-600 font-black uppercase tracking-widest text-xs">Service Ticket Finalized</p></div>;
-                    })()}
-                    <button onClick={() => setSelectedJob(null)} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-700 transition-colors py-2">Dismiss Details</button>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Service Location</p>
+                  <div className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
+                    <LucideIcon d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                    <p className="text-sm font-bold text-slate-700 leading-relaxed">{selectedJob.booking?.user?.address || "Not specified"}</p>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
 
-          <style jsx global>{`
-        @keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes slide-up { from { transform: translateY(24px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
-        @keyframes bounce-in { 0% { transform: scale(0.8) translateY(-10px); opacity: 0 } 70% { transform: scale(1.03) } 100% { transform: scale(1) translateY(0); opacity: 1 } }
-        @keyframes progress-shrink { from { width: 100% } to { width: 0% } }
-        .fade-in { animation: fade-in 0.3s ease-out }
-        .animate-fade-in { animation: fade-in 0.25s ease-out }
-        .animate-slide-up { animation: slide-up 0.4s cubic-bezier(0.16,1,0.3,1) }
-        .animate-bounce-in { animation: bounce-in 0.4s cubic-bezier(0.16,1,0.3,1) }
-        .animate-progress-shrink { animation: progress-shrink 15s linear forwards }
-        .custom-scrollbar::-webkit-scrollbar { width: 5px }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #cbd5e1 }
-      `}</style>
+              {selectedJob.booking?.notes && (
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Job Directives</p>
+                  <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-100">
+                    <p className="text-sm font-medium text-slate-700 italic">"{selectedJob.booking.notes}"</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-4 border-t border-slate-100 space-y-3">
+                {(() => {
+                  const { canStart, canComplete, label } = calculateJobTimings(selectedJob);
+
+                  // Calculate if cancellation is allowed (Strict 24h Deadline)
+                  let canCancel = true;
+                  if (selectedJob.booking?.preferred_time) {
+                    try {
+                      const startTimePart = selectedJob.booking.preferred_time.split(/\s*[–-]\s*/)[0].trim();
+                      const startDt = new Date(`${selectedJob.booking.preferred_date} ${startTimePart}`);
+                      const deadlineDt = new Date(startDt.getTime() - 24 * 60 * 60 * 1000);
+                      if (new Date() >= deadlineDt) canCancel = false;
+                    } catch (e) { }
+                  }
+
+                  if (selectedJob.status === "pending")
+                    return <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "claimed"); setSelectedJob(null); }} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10">Claim This Job</button>;
+
+                  if (selectedJob.status === "claimed")
+                    return (
+                      <div className="space-y-4">
+                        <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "in_progress"); setSelectedJob(null); }} disabled={!canStart} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10 disabled:opacity-50">Confirm Arrival & Start Work</button>
+                        {canCancel && (
+                          <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "rejected"); setSelectedJob(null); }} className="w-full py-4 rounded-2xl border-2 border-red-50 text-red-500 font-black hover:bg-red-50 transition-all text-sm">Cancel Allotment</button>
+                        )}
+                        {!canCancel && <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 py-3 rounded-2xl border border-slate-100">🚫 Cancellation Locked (Under 24h left)</p>}
+                        <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Mark as Could Not Complete</button>
+                      </div>
+                    );
+                  if (selectedJob.status === "in_progress")
+                    return (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          {!canComplete && <p className="text-center text-xs font-bold text-slate-400 uppercase">Wait until near end of slot</p>}
+                          <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "completed"); setSelectedJob(null); }} disabled={!canComplete} className="btn-pro btn-pro-primary w-full !bg-sky-600 hover:!bg-sky-700 !py-4 text-base disabled:opacity-40">Mark as Successfully Completed</button>
+                        </div>
+                        <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Job Not Completed</button>
+                      </div>
+                    );
+                  return <div className="text-center py-3 bg-emerald-50 rounded-2xl border border-emerald-100"><p className="text-emerald-600 font-black uppercase tracking-widest text-xs">Service Ticket Finalized</p></div>;
+                })()}
+                <button onClick={() => setSelectedJob(null)} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-700 transition-colors py-2">Dismiss Details</button>
+              </div>
+            </div>
+          </div>
         </div>
-      );
+      )}
+
+
+    </div>
+  );
+}
+
+export default function WorkerDashboard() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
+  );
 }

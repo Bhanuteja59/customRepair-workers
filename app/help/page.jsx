@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 export default function HelpRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/dashboard");
+    router.replace("/dashboard?tab=help");
   }, [router]);
   return null;
 }

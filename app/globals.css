@@ -12,12 +12,14 @@
   --glass-border: rgba(255, 255, 255, 0.3);
 }
 
-@theme inline {
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-emerald: var(--emerald);
   --color-emerald-dark: var(--emerald-dark);
   --color-indigo: var(--indigo);
+  --color-primary: var(--emerald);
+  --color-primary-dark: var(--emerald-dark);
 }
 
 html {
@@ -99,10 +101,29 @@ body {
   letter-spacing: 0.1em;
 }
 
-.badge-success { background: #ecfdf5; color: #065f46; border: 1px solid #d1fae5; }
-.badge-warning { background: #fffbeb; color: #92400e; border: 1px solid #fef3c7; }
-.badge-danger { background: #fef2f2; color: #991b1b; border: 1px solid #fee2e2; }
-.badge-info { background: #eef2ff; color: #3730a3; border: 1px solid #e0e7ff; }
+.badge-success {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #d1fae5;
+}
+
+.badge-warning {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fef3c7;
+}
+
+.badge-danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fee2e2;
+}
+
+.badge-info {
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #e0e7ff;
+}
 
 /* ── Form Inputs ── */
 .input-pro {
@@ -136,21 +157,43 @@ body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 5px;
 }
+
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: #e2e8f0;
   border-radius: 10px;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #cbd5e1;
 }
+
+/* ── Dashboard Animations ── */
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes slide-up { from { transform: translateY(24px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+@keyframes bounce-in { 0% { transform: scale(0.8) translateY(-10px); opacity: 0 } 70% { transform: scale(1.03) } 100% { transform: scale(1) translateY(0); opacity: 1 } }
+@keyframes progress-shrink { from { width: 100% } to { width: 0% } }
+
+.fade-in { animation: fade-in 0.3s ease-out }
+.animate-fade-in { animation: fade-in 0.25s ease-out }
+.animate-slide-up { animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) }
+.animate-bounce-in { animation: bounce-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) }
+.animate-progress-shrink { animation: progress-shrink 15s linear forwards }
