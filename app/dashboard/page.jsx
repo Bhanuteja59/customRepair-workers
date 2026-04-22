@@ -1,19 +1,60 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const STATUS_THEMES = {
-  open:        { label: "Pending Review",   badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  pending:     { label: "Evaluating",       badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  assigned:    { label: "New Assignment", badge: "badge-info",    icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
-  claimed:     { label: "Job Confirmed",  badge: "badge-success", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
-  in_progress: { label: "Working Now",      badge: "badge-success", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
-  completed:   { label: "Done!",            badge: "badge-info",    icon: "M5 13l4 4L19 7" },
-  not_completed: { label: "Unfinished",      badge: "badge-danger",  icon: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 17c-.77 1.333.192 3 1.732 3z" },
-  expired:     { label: "Missed Slot",      badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  open: { label: "Pending Review", badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  pending: { label: "Evaluating", badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  assigned: { label: "New Assignment", badge: "badge-info", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0z" },
+  claimed: { label: "Job Confirmed", badge: "badge-success", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  in_progress: { label: "Working Now", badge: "badge-success", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+  completed: { label: "Done!", badge: "badge-info", icon: "M5 13l4 4L19 7" },
+  not_completed: { label: "Unfinished", badge: "badge-danger", icon: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 17c-.77 1.333.192 3 1.732 3z" },
+  expired: { label: "Missed Slot", badge: "badge-warning", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
 };
+
+function Toggle({ value, onChange, label, sub }) {
+  return (
+    <div className="flex items-center justify-between py-4 border-b border-slate-100 last:border-0">
+      <div>
+        <p className="text-sm font-bold text-slate-900">{label}</p>
+        {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+      </div>
+      <button
+        onClick={() => onChange(!value)}
+        className={`w-12 h-6 rounded-full transition-all duration-300 relative ${value ? "bg-emerald-500" : "bg-slate-200"}`}
+      >
+        <div className={`w-5 h-5 rounded-full bg-white shadow-md absolute top-0.5 transition-all duration-300 ${value ? "left-6" : "left-0.5"}`} />
+      </button>
+    </div>
+  );
+}
+
+const SETTINGS_SECTIONS = [
+  { id: "notifications", label: "Notifications", icon: "M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" },
+  { id: "schedule_prefs", label: "Schedule Preferences", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
+  { id: "privacy", label: "Privacy & Security", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
+  { id: "appearance", label: "Appearance", icon: "M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" },
+  { id: "danger", label: "Danger Zone", icon: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 17c-.77 1.333.192 3 1.732 3z" },
+];
+
+const FAQ = [
+  { q: "How do I get assigned to a job?", a: "Add availability slots in 'My Schedule', then set your trade specializations in your Profile. The dispatcher matches open bookings to workers with matching skills and time slots." },
+  { q: "When can I start a job?", a: "You can tap 'Start Work' only during the job's scheduled time window. The button activates when the booking start time is reached." },
+  { q: "How do I finish a job early?", a: "The 'Finish Work' button activates 30 minutes before the end of the scheduled slot. This prevents premature completions." },
+  { q: "How are jobs assigned to me?", a: "Our system automatically matches technicians based on workload and skill. The technician with the least total jobs and an available slot for the requested time is chosen automatically." },
+  { q: "What happens if I miss a job slot?", a: "Missed slots are marked as 'Expired'. Your profile score may be affected. Contact dispatch if you have an emergency." },
+  { q: "How do I update my phone number?", a: "Go to Settings → Profile & Identity and update your phone number there." },
+  { q: "Can I reject a directly assigned job?", a: "Yes. When you receive a direct assignment notification, tap 'Reject' to decline. The job returns to the pool." },
+];
+
+const GUIDES = [
+  { title: "Getting Started Guide", icon: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253", color: "from-emerald-500 to-teal-600" },
+  { title: "How Job Matching Works", icon: "M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7", color: "from-blue-500 to-indigo-600" },
+  { title: "Managing Your Schedule", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z", color: "from-purple-500 to-pink-600" },
+];
 
 function LucideIcon({ d, className = "w-4 h-4" }) {
   return (
@@ -23,85 +64,15 @@ function LucideIcon({ d, className = "w-4 h-4" }) {
   );
 }
 
-// ── Chart Components ──────────────────────────────────────────────────────────
-
-function LineChart({ data, color = "#10b981", id = "lc" }) {
-  const W = 300, H = 110, pl = 32, pr = 12, pt = 8, pb = 28;
-  const cW = W - pl - pr, cH = H - pt - pb;
-  const max = Math.max(...data.map(d => d.v), 1);
-  const px = i => pl + (i / Math.max(data.length - 1, 1)) * cW;
-  const py = v => pt + cH - (v / max) * cH;
-  const line = data.map((d, i) => `${i === 0 ? "M" : "L"} ${px(i).toFixed(1)} ${py(d.v).toFixed(1)}`).join(" ");
-  const area = `M ${px(0).toFixed(1)} ${(pt + cH).toFixed(1)} ${data.map((d, i) => `L ${px(i).toFixed(1)} ${py(d.v).toFixed(1)}`).join(" ")} L ${px(data.length - 1).toFixed(1)} ${(pt + cH).toFixed(1)} Z`;
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 110 }}>
-      <defs>
-        <linearGradient id={`grad-${id}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {[0.25, 0.5, 0.75, 1].map(f => (
-        <line key={f} x1={pl} x2={W - pr} y1={pt + cH * (1 - f)} y2={pt + cH * (1 - f)} stroke="#f1f5f9" strokeWidth="1" />
-      ))}
-      <path d={area} fill={`url(#grad-${id})`} />
-      <path d={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      {data.map((d, i) => (
-        <g key={i}>
-          <circle cx={px(i)} cy={py(d.v)} r="4" fill={color} stroke="white" strokeWidth="2" />
-          <text x={px(i)} y={H - 4} textAnchor="middle" fontSize="8" fill="#94a3b8" fontFamily="sans-serif">{d.l}</text>
-          {d.v > 0 && <text x={px(i)} y={py(d.v) - 8} textAnchor="middle" fontSize="8" fill={color} fontWeight="700">{d.v}</text>}
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-function DonutChart({ value, total, color = "#10b981", trackColor = "#f1f5f9" }) {
-  const r = 34, cx = 45, cy = 45, circ = 2 * Math.PI * r;
-  const pct = total > 0 ? Math.min(value / total, 1) : 0;
-  return (
-    <svg width="90" height="90" viewBox="0 0 90 90">
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke={trackColor} strokeWidth="9" />
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="9"
-        strokeDasharray={`${circ * pct} ${circ * (1 - pct)}`}
-        strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`}
-        style={{ transition: "stroke-dasharray 1.4s cubic-bezier(0.16,1,0.3,1)" }} />
-      <text x={cx} y={cy + 1} textAnchor="middle" dominantBaseline="middle"
-        fontSize="16" fontWeight="900" fill="#0f172a">
-        {Math.round(pct * 100)}%
-      </text>
-    </svg>
-  );
-}
-
-function MiniBar({ data }) {
-  const max = Math.max(...data.map(d => d.v), 1);
-  return (
-    <div className="flex items-end gap-2 h-24 w-full px-1">
-      {data.map((d, i) => (
-        <div key={i} className="flex flex-col items-center flex-1 gap-1">
-          <span className="text-[9px] font-black text-slate-500 leading-none">{d.v || ""}</span>
-          <div className="w-full rounded-t-lg" style={{
-            height: `${Math.max((d.v / max) * 60, d.v > 0 ? 4 : 0)}px`,
-            backgroundColor: d.color || "#10b981",
-            transition: `height 0.9s cubic-bezier(0.16,1,0.3,1) ${i * 70}ms`,
-          }} />
-          <span className="text-[9px] font-bold text-slate-400 truncate w-full text-center leading-none">{d.l}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function KpiCard({ label, value, icon, color = "emerald", sub }) {
   const c = {
     emerald: "from-emerald-500 to-emerald-600",
-    blue:    "from-blue-500 to-blue-600",
-    amber:   "from-amber-500 to-amber-600",
-    purple:  "from-purple-500 to-purple-600",
-    sky:     "from-sky-500 to-sky-600",
-    rose:    "from-rose-500 to-rose-600",
+    blue: "from-blue-500 to-blue-600",
+    amber: "from-amber-500 to-amber-600",
+    purple: "from-purple-500 to-purple-600",
+    sky: "from-sky-500 to-sky-600",
+    rose: "from-rose-500 to-rose-600",
   }[color] || "from-emerald-500 to-emerald-600";
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition-shadow">
@@ -119,8 +90,11 @@ function KpiCard({ label, value, icon, color = "emerald", sub }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function WorkerDashboard() {
+function DashboardContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+
   const [worker, setWorker] = useState(null);
   const [token, setToken] = useState(null);
   const [activeTab, setActiveTab] = useState("start_work");
@@ -131,24 +105,43 @@ export default function WorkerDashboard() {
   const [slotForm, setSlotForm] = useState({ slot_date: "", start_time: "09:00 AM", end_time: "11:00 AM" });
   const [slotSaving, setSlotSaving] = useState(false);
   const [slotError, setSlotError] = useState("");
-  const [availableJobs, setAvailableJobs] = useState([]);
+
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notification, setNotification] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
+
+  // Settings & Help state
+  const [activeSection, setActiveSection] = useState("profile");
+  const [notifPrefs, setNotifPrefs] = useState({ newLead: true, jobAssigned: true, scheduleReminder: true, systemUpdates: false, marketing: false });
+  const [schedPrefs, setSchedPrefs] = useState({ autoAccept: false, bufferBetweenJobs: true, weekendsAvailable: true, maxJobsPerDay: "3" });
+  const [privacyPrefs, setPrivacyPrefs] = useState({ showPhone: false, locationSharing: true, twoFactor: false });
+  const [helpSearch, setHelpSearch] = useState("");
+  const [openFaq, setOpenFaq] = useState(null);
+  const [helpTicket, setHelpTicket] = useState({ subject: "", desc: "", priority: "normal" });
+  const [ticketSubmitted, setTicketSubmitted] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (tabParam && ["my_schedule", "start_work", "work_progress", "completed", "settings", "help", "profile", "earnings"].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
+
   const calculateJobTimings = (job) => {
     if (!job?.booking?.preferred_date) return { canStart: true, canComplete: true, start: null, end: null, label: null };
-    const timeParts = job.booking.preferred_time?.split(/\s*[-\u2013]\s*/) || [];
+    const timeParts = job.booking.preferred_time?.split(/\s*[–-]\s*/) || [];
     if (timeParts.length !== 2) return { canStart: true, canComplete: true, start: null, end: null, label: null };
     const start = new Date(`${job.booking.preferred_date} ${timeParts[0]}`);
-    const end   = new Date(`${job.booking.preferred_date} ${timeParts[1]}`);
+    const end = new Date(`${job.booking.preferred_date} ${timeParts[1]}`);
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return { canStart: true, canComplete: true, start: null, end: null, label: null };
-    const canStart    = currentTime >= new Date(start.getTime() - 30 * 60000) && currentTime < end;
+    const canStart = currentTime >= new Date(start.getTime() - 30 * 60000) && currentTime < end;
     const canComplete = currentTime >= new Date(end.getTime() - 30 * 60000);
     let label = null;
     if (currentTime < start) {
       const diffMs = start - currentTime;
-      const diffHrs  = Math.floor(diffMs / 3600000);
+      const diffHrs = Math.floor(diffMs / 3600000);
       const diffMins = Math.round((diffMs % 3600000) / 60000);
       label = diffHrs > 0 ? `Starts in ${diffHrs}h ${diffMins}m` : `Starts in ${diffMins}m`;
     } else if (currentTime > end) {
@@ -169,24 +162,24 @@ export default function WorkerDashboard() {
 
   const getFilteredJobs = () => {
     const jList = jobs || [];
-    if (activeTab === "open_market") return (availableJobs || []);
-    if (activeTab === "start_work")  return jList.filter(j => ["assigned", "claimed"].includes(j.status));
+
+    if (activeTab === "start_work") return jList.filter(j => ["assigned", "claimed"].includes(j.status));
     if (activeTab === "work_progress") return jList.filter(j => j.status === "in_progress");
-    if (activeTab === "completed")     return jList.filter(j => j.status === "completed" || j.status === "not_completed");
+    if (activeTab === "completed") return jList.filter(j => j.status === "completed" || j.status === "not_completed");
     return [];
   };
 
   const filteredJobs = getFilteredJobs();
 
   // ── Analytics data ────────────────────────────────────────────────────────
-  const completedJobs  = (jobs || []).filter(j => j.status === "completed");
+  const completedJobs = (jobs || []).filter(j => j.status === "completed");
   const inProgressJobs = (jobs || []).filter(j => j.status === "in_progress");
-  const pendingJobs    = (jobs || []).filter(j => ["assigned","claimed"].includes(j.status));
+  const pendingJobs = (jobs || []).filter(j => ["assigned", "claimed"].includes(j.status));
 
   const last7Days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d;
   });
-  const dayLabels = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+  const dayLabels = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
   const jobsByDay = last7Days.map(d => ({
     l: dayLabels[d.getDay()],
     v: completedJobs.filter(j => {
@@ -196,24 +189,38 @@ export default function WorkerDashboard() {
   }));
 
   const serviceColors = { hvac: "#6366f1", plumbing: "#0ea5e9", electrical: "#f59e0b", general: "#10b981" };
-  const jobsByService = ["hvac","plumbing","electrical","general"].map(s => ({
+  const jobsByService = ["hvac", "plumbing", "electrical", "general"].map(s => ({
     l: s.charAt(0).toUpperCase() + s.slice(1),
     v: completedJobs.filter(j => getSkills(j.booking?.service).includes(s)).length,
     color: serviceColors[s],
   }));
 
-  const slotsByDay = last7Days.map(d => ({
-    l: dayLabels[d.getDay()],
-    v: (mySlots || []).filter(s => s.slot_date === d.toISOString().split("T")[0]).length,
-    color: "#6366f1",
-  }));
+
 
   // ── Auth & data fetching ──────────────────────────────────────────────────
   useEffect(() => {
     const t = localStorage.getItem("worker_token");
     const w = localStorage.getItem("worker_data");
     if (!t || !w) { router.replace("/login"); return; }
-    setToken(t); setWorker(JSON.parse(w));
+    setToken(t);
+    try {
+      const wObj = JSON.parse(w);
+      setWorker(wObj);
+      setProfileForm({
+        name: wObj.name || "",
+        phone: wObj.phone || "",
+        email: wObj.email || "",
+        specializations: wObj.specializations || []
+      });
+      // Load preferences from DB
+      if (wObj.notif_prefs) setNotifPrefs(wObj.notif_prefs);
+      if (wObj.sched_prefs) setSchedPrefs(wObj.sched_prefs);
+      if (wObj.privacy_prefs) setPrivacyPrefs(wObj.privacy_prefs);
+    } catch (e) {
+      console.error("Failed to parse worker data", e);
+      localStorage.clear();
+      router.replace("/login");
+    }
   }, [router]);
 
   const fetchSlots = useCallback(async () => {
@@ -222,22 +229,17 @@ export default function WorkerDashboard() {
       const res = await fetch(`${API}/api/workers/slots`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setMySlots(Array.isArray(data) ? data : []);
-    } catch {}
+    } catch { }
   }, [token]);
 
   const fetchData = useCallback(async () => {
     if (!token || !worker) return;
     setIsRefreshing(true);
     try {
-      const [resMy, resAvail] = await Promise.all([
-        fetch(`${API}/api/workers/jobs`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/api/workers/pending-jobs`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
+      const resMy = await fetch(`${API}/api/workers/jobs`, { headers: { Authorization: `Bearer ${token}` } });
       const myData = await resMy.json();
-      const availData = await resAvail.json();
       setJobs(Array.isArray(myData) ? myData : []);
-      setAvailableJobs(Array.isArray(availData) ? availData : []);
-    } catch {} finally { setIsRefreshing(false); }
+    } catch { } finally { setIsRefreshing(false); }
   }, [token, worker]);
 
   useEffect(() => { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }, []);
@@ -287,64 +289,72 @@ export default function WorkerDashboard() {
         else if (errData?.detail) alert(typeof errData.detail === "string" ? errData.detail : JSON.stringify(errData.detail));
         else alert("Server error: Status " + res.status);
       }
-    } catch {}
+    } catch { }
   }
 
-  async function updateProfile(e) {
+  const logout = () => { localStorage.clear(); router.replace("/login"); };
+
+  const saveSettings = async (e) => {
     if (e) e.preventDefault();
+    setSaving(true);
     try {
+      const payload = {
+        ...profileForm,
+        notif_prefs: notifPrefs,
+        sched_prefs: schedPrefs,
+        privacy_prefs: privacyPrefs,
+      };
       const res = await fetch(`${API}/api/workers/profile`, {
         method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(profileForm),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const updated = await res.json();
         setWorker(updated); localStorage.setItem("worker_data", JSON.stringify(updated));
-        setNotification({ type: "success", title: "Profile Updated", msg: "Your skills and info have been saved." });
-        setActiveTab("start_work");
+        setSettingsSaved(true);
+        setTimeout(() => setSettingsSaved(false), 3000);
       }
-    } catch {}
-  }
+    } catch { } finally { setSaving(false); }
+  };
 
-  const logout = () => { localStorage.clear(); router.replace("/login"); };
+  const submitTicket = (e) => {
+    e.preventDefault();
+    setTicketSubmitted(true);
+  };
 
   if (!worker) return null;
 
   // ── Nav items ─────────────────────────────────────────────────────────────
   const workspaceItems = [
-    { id: "my_schedule",   label: "My Schedule",   icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
-    { id: "start_work",    label: "Assigned Jobs", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
-    { id: "work_progress", label: "In Progress",   icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-    { id: "completed",     label: "Completed",     icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
-    { id: "analytics",     label: "Analytics",     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
+    { id: "my_schedule", label: "My Schedule", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
+    { id: "earnings", label: "Earnings & Analytics", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+    { id: "start_work", label: "Assigned Jobs", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+    { id: "work_progress", label: "In Progress", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+    { id: "completed", label: "Completed", icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
   ];
 
   const getBadge = (id) => {
-    if (id === "my_schedule")   return (mySlots || []).filter(s => !s.is_booked).length;
-    if (id === "start_work")    return (jobs || []).filter(j => ["assigned", "claimed"].includes(j.status)).length;
+    if (id === "my_schedule") return (mySlots || []).filter(s => !s.is_booked).length;
+    if (id === "start_work") return (jobs || []).filter(j => ["assigned", "claimed"].includes(j.status)).length;
     if (id === "work_progress") return (jobs || []).filter(j => j.status === "in_progress").length;
-    if (id === "completed")     return (jobs || []).filter(j => j.status === "completed" || j.status === "not_completed").length;
+    if (id === "completed") return (jobs || []).filter(j => j.status === "completed" || j.status === "not_completed").length;
     return 0;
   };
 
-  const insightsPages = [
-    { label: "Performance",  icon: "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6", href: "/analytics" },
-    { label: "My Earnings",  icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z", href: "/earnings" },
-  ];
 
   const toolPages = [
-    { label: "Messages",  icon: "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z", href: "/messages" },
-    { label: "Settings",  icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z", href: "/settings" },
-    { label: "Help & Support", icon: "M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z", href: "/help" },
+    { id: "settings", label: "Settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
+    { id: "help", label: "Help & Support", icon: "M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   ];
 
   const tabTitle = {
-    my_schedule: "My Schedule", 
+    my_schedule: "My Schedule",
     start_work: "Assigned Jobs",
-    work_progress: "Active Tasks", 
-    completed: "Job History", 
-    analytics: "Performance Analytics",
-    profile: "My Settings",
+    work_progress: "Active Tasks",
+    earnings: "Earnings & Analytics",
+    settings: "System Settings",
+    help: "Help & Support",
+    profile: "My Profile",
   };
 
   return (
@@ -389,9 +399,8 @@ export default function WorkerDashboard() {
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
-                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                      activeTab === item.id ? "bg-emerald-600 text-white shadow-xl shadow-emerald-900/30" : "text-slate-400 hover:text-white hover:bg-white/5"
-                    }`}
+                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === item.id ? "bg-emerald-600 text-white shadow-xl shadow-emerald-900/30" : "text-slate-400 hover:text-white hover:bg-white/5"
+                      }`}
                   >
                     <div className="flex items-center gap-3">
                       <LucideIcon d={item.icon} className="w-4 h-4 shrink-0" />
@@ -408,23 +417,6 @@ export default function WorkerDashboard() {
             </nav>
           </div>
 
-          {/* INSIGHTS */}
-          <div>
-            <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.25em] px-2 mb-2">Insights</p>
-            <nav className="space-y-1">
-              {insightsPages.map(item => (
-                <button
-                  key={item.href}
-                  onClick={() => router.push(item.href)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition-all"
-                >
-                  <LucideIcon d={item.icon} className="w-4 h-4 shrink-0" />
-                  {item.label}
-                  <LucideIcon d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" className="w-3 h-3 ml-auto opacity-40" />
-                </button>
-              ))}
-            </nav>
-          </div>
 
           {/* TOOLS */}
           <div>
@@ -432,9 +424,9 @@ export default function WorkerDashboard() {
             <nav className="space-y-1">
               {toolPages.map(item => (
                 <button
-                  key={item.href}
-                  onClick={() => router.push(item.href)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === item.id ? "bg-emerald-600 text-white shadow-xl shadow-emerald-900/30" : "text-slate-400 hover:text-white hover:bg-white/5"}`}
                 >
                   <LucideIcon d={item.icon} className="w-4 h-4 shrink-0" />
                   {item.label}
@@ -447,10 +439,9 @@ export default function WorkerDashboard() {
         {/* Bottom account bar */}
         <div className="px-4 py-4 border-t border-white/5 space-y-1">
           <button
-            onClick={() => { setProfileForm({ name: worker.name, phone: worker.phone, specializations: worker.specializations || [] }); setActiveTab("profile"); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-              activeTab === "profile" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white hover:bg-white/5"
-            }`}
+            onClick={() => setActiveTab("profile")}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${activeTab === "profile" ? "bg-emerald-600 text-white shadow-xl shadow-emerald-900/30" : "text-slate-400 hover:text-white hover:bg-white/5"
+              }`}
           >
             <LucideIcon d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" className="w-4 h-4 shrink-0" />
             My Profile
@@ -490,210 +481,136 @@ export default function WorkerDashboard() {
 
         <div className="p-8 max-w-6xl mx-auto">
 
-          {/* ── KPI bar (always visible except profile) ── */}
-          {activeTab !== "profile" && (
+          {/* ── KPI bar ── */}
+          {(activeTab !== "settings" && activeTab !== "help" && activeTab !== "profile" && activeTab !== "earnings") && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 fade-in">
-              <KpiCard label="Assigned"     value={pendingJobs.length}   icon="M13 10V3L4 14h7v7l9-11h-7z"  color="blue" />
-              <KpiCard label="In Progress"  value={inProgressJobs.length} icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" color="purple" />
-              <KpiCard label="Completed"    value={completedJobs.length}  icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" color="emerald" />
+              <KpiCard label="Assigned" value={pendingJobs.length} icon="M13 10V3L4 14h7v7l9-11h-7z" color="blue" />
+              <KpiCard label="In Progress" value={inProgressJobs.length} icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" color="purple" />
+              <KpiCard label="Completed" value={completedJobs.length} icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" color="emerald" />
             </div>
           )}
 
-          {/* ── PROFILE TAB ── */}
-          {activeTab === "profile" && (
-            <div className="fade-in">
-              <div className="mb-8">
-                <h3 className="text-2xl font-black text-slate-900">My Settings</h3>
-                <p className="text-xs font-black text-slate-400 mt-1 uppercase tracking-widest">Technician Identity & Skills</p>
+
+          {/* ── EARNINGS TAB ── */}
+          {activeTab === "earnings" && (
+            <div className="space-y-8 fade-in">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <KpiCard label="Total Revenue" value={`$${(completedJobs.length * 85).toLocaleString()}`} icon="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" color="emerald" sub="Estimated base" />
+                <KpiCard label="Efficiency" value={`${Math.round((completedJobs.length / (jobs.length || 1)) * 100)}%`} icon="M13 10V3L4 14h7v7l9-11h-7z" color="blue" sub="Completion rate" />
+                <KpiCard label="Avg/Job" value="$85.00" icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" color="purple" sub="Standard rate" />
+                <KpiCard label="Next Payout" value={`$${(completedJobs.length * 85 * 0.8).toFixed(2)}`} icon="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" color="amber" sub="Net after fees" />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="card-pro p-8 bg-white border-none shadow-xl">
-                  <form onSubmit={updateProfile} className="space-y-6">
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Weekly Volume Chart */}
+                <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
+                  <div className="flex items-center justify-between mb-8">
                     <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Professional Trades</label>
-                      <div className="flex flex-wrap gap-2">
-                        {[{ value: "hvac", label: "HVAC" }, { value: "plumbing", label: "Plumbing" }, { value: "electrical", label: "Electrical" }, { value: "general", label: "General" }].map(s => {
-                          const isSel = profileForm?.specializations.includes(s.value);
-                          return (
-                            <button key={s.value} type="button"
-                              onClick={() => { const cur = profileForm.specializations; setProfileForm(p => ({ ...p, specializations: isSel ? cur.filter(v => v !== s.value) : [...cur, s.value] })); }}
-                              className={`px-4 py-2.5 rounded-xl text-xs font-bold border transition-all ${isSel ? "bg-emerald-600 text-white border-emerald-600 shadow-lg" : "bg-slate-50 text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600"}`}
-                            >{s.label}</button>
-                          );
-                        })}
-                      </div>
-                      {profileForm?.specializations.length === 0 && <p className="text-[10px] text-red-400 mt-2 font-bold">Select at least one trade.</p>}
+                      <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Weekly Performance</h4>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Completed jobs by day</p>
                     </div>
-                    <div className="h-px bg-slate-100" />
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Technician Name</label>
-                        <input type="text" value={profileForm?.name || ""} onChange={e => setProfileForm(p => ({ ...p, name: e.target.value }))} className="input-pro !bg-slate-50 border-transparent focus:!bg-white" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">On-Site Phone</label>
-                        <input type="tel" value={profileForm?.phone || ""} onChange={e => setProfileForm(p => ({ ...p, phone: e.target.value }))} className="input-pro !bg-slate-50 border-transparent focus:!bg-white" />
-                      </div>
-                    </div>
-                    <button type="submit" disabled={profileForm?.specializations.length === 0} className="w-full btn-pro btn-pro-primary !py-4 shadow-xl shadow-emerald-900/20 disabled:grayscale disabled:opacity-50">Apply Profile Changes</button>
-                  </form>
-                </div>
-                <div className="space-y-6">
-                  <div className="card-pro p-8 bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-500/10 blur-3xl" />
-                    <h3 className="text-lg font-black mb-1 relative z-10">Fleet Security</h3>
-                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-6 relative z-10">Verification Status</p>
-                    <div className="space-y-3 relative z-10">
-                      <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
-                        <div>
-                          <p className="text-xs font-black uppercase text-emerald-400">Live & Authenticated</p>
-                          <p className="text-[10px] text-slate-500 font-bold mt-0.5">Worker ID: {worker.id}</p>
-                        </div>
-                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.8)]" />
-                      </div>
-                      <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 opacity-60">
-                        <div>
-                          <p className="text-xs font-black uppercase text-slate-300">Background Status</p>
-                          <p className="text-[10px] text-slate-500 font-bold mt-0.5">Cleared</p>
-                        </div>
-                        <LucideIcon d="M9 12l2 2 4-4" className="text-emerald-400 w-5 h-5" />
-                      </div>
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <div className="w-2 h-2 rounded-full bg-slate-200" />
                     </div>
                   </div>
-                  <div className="bg-amber-50 rounded-2xl p-5 border border-amber-100 flex items-start gap-4">
-                    <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                      <LucideIcon d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" className="w-5 h-5 text-amber-600" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-amber-900 uppercase tracking-widest mb-1">Dispatcher Note</p>
-                      <p className="text-xs text-amber-700 font-medium italic">"Adding more skills reveals complex multi-trade leads in your area. Keep your profile sharp!"</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── ANALYTICS TAB ── */}
-          {activeTab === "analytics" && (
-            <div className="space-y-6 fade-in">
-              {/* Chart row */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Line chart */}
-                <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-sm font-black text-slate-900">Jobs Completed</h3>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Last 7 days</p>
-                    </div>
-                    <span className="text-2xl font-black text-emerald-600">{completedJobs.length}</span>
-                  </div>
-                  <LineChart data={jobsByDay} color="#10b981" id="jobs" />
-                </div>
-
-                {/* Donut */}
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col items-center justify-center gap-4">
-                  <div className="text-center">
-                    <h3 className="text-sm font-black text-slate-900">Completion Rate</h3>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">All-time</p>
-                  </div>
-                  <DonutChart value={completedJobs.length} total={jobs.length} color="#10b981" />
-                  <div className="grid grid-cols-2 gap-3 w-full text-center">
-                    <div className="bg-slate-50 rounded-xl p-3">
-                      <p className="text-lg font-black text-slate-900">{completedJobs.length}</p>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Done</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-xl p-3">
-                      <p className="text-lg font-black text-slate-900">{jobs.length}</p>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bar chart row */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                  <h3 className="text-sm font-black text-slate-900 mb-1">Jobs by Trade</h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5">Completed breakdown</p>
-                  <MiniBar data={jobsByService} />
-                  <div className="flex flex-wrap gap-3 mt-4">
-                    {jobsByService.map(d => (
-                      <div key={d.l} className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: d.color }} />
-                        <span className="text-[10px] font-bold text-slate-400">{d.l}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                  <h3 className="text-sm font-black text-slate-900 mb-1">Availability Slots</h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5">Scheduled per day this week</p>
-                  <MiniBar data={slotsByDay} />
-                  <div className="flex items-center gap-2 mt-4">
-                    <div className="w-2.5 h-2.5 rounded-sm bg-indigo-500" />
-                    <span className="text-[10px] font-bold text-slate-400">Available slots</span>
-                    <span className="ml-auto text-[10px] font-black text-slate-600">{mySlots.filter(s => !s.is_booked).length} open · {mySlots.filter(s => s.is_booked).length} booked</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Skills + recent activity */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                  <h3 className="text-sm font-black text-slate-900 mb-4">My Trade Skills</h3>
-                  <div className="space-y-3">
-                    {["hvac","plumbing","electrical","general"].map(skill => {
-                      const isActive = worker.specializations?.includes(skill);
-                      const count = completedJobs.filter(j => getSkills(j.booking?.service).includes(skill)).length;
-                      const pct = completedJobs.length > 0 ? (count / completedJobs.length) * 100 : 0;
+                  <div className="flex items-end justify-between h-48 gap-2 px-2">
+                    {jobsByDay.map((d, i) => {
+                      const max = Math.max(...jobsByDay.map(x => x.v), 1);
+                      const height = (d.v / max) * 100;
                       return (
-                        <div key={skill}>
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: serviceColors[skill] }} />
-                              <span className="text-xs font-black text-slate-700 capitalize">{skill}</span>
-                              {isActive && <span className="text-[8px] font-black text-emerald-500 uppercase bg-emerald-50 px-1.5 py-0.5 rounded-md">Active</span>}
+                        <div key={i} className="flex-1 flex flex-col items-center gap-3 group">
+                          <div className="relative w-full flex flex-col justify-end h-full">
+                            <div
+                              style={{ height: `${height}%` }}
+                              className="w-full bg-slate-50 rounded-t-lg group-hover:bg-emerald-500 transition-all duration-500 relative overflow-hidden"
+                            >
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
                             </div>
-                            <span className="text-[10px] font-bold text-slate-400">{count} jobs</span>
+                            {d.v > 0 && (
+                              <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="bg-slate-900 text-white text-[10px] font-black px-2 py-1 rounded-md">{d.v}</span>
+                              </div>
+                            )}
                           </div>
-                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: serviceColors[skill] }} />
-                          </div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{d.l}</p>
                         </div>
                       );
                     })}
                   </div>
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                  <h3 className="text-sm font-black text-slate-900 mb-4">Recent Activity</h3>
-                  {completedJobs.length === 0 ? (
-                    <div className="text-center py-8 text-slate-300">
-                      <LucideIcon d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" className="w-10 h-10 mx-auto mb-2" />
-                      <p className="text-xs font-black uppercase text-slate-400">No completed jobs yet</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar pr-1">
-                      {completedJobs.slice(0, 8).map(j => (
-                        <div key={j.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
-                            <LucideIcon d="M9 12l2 2 4-4" className="w-4 h-4 text-emerald-600" />
+                {/* Service Breakdown */}
+                <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
+                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8">Trade Breakdown</h4>
+                  <div className="space-y-6">
+                    {jobsByService.map((s, i) => {
+                      const total = completedJobs.length || 1;
+                      const pct = Math.round((s.v / total) * 100);
+                      return (
+                        <div key={i} className="space-y-2">
+                          <div className="flex justify-between items-end">
+                            <p className="text-xs font-black text-slate-700 uppercase tracking-tight">{s.l}</p>
+                            <p className="text-[10px] font-bold text-slate-400">{s.v} jobs ({pct}%)</p>
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-black text-slate-900 truncate capitalize">{j.booking?.service}</p>
-                            <p className="text-[10px] text-slate-400 font-bold">{j.booking?.preferred_date}</p>
+                          <div className="h-2.5 w-full bg-slate-50 rounded-full overflow-hidden">
+                            <div
+                              style={{ width: `${pct}%`, backgroundColor: s.color }}
+                              className="h-full rounded-full shadow-[0_0_8px_rgba(0,0,0,0.05)] transition-all duration-1000"
+                            />
                           </div>
-                          <span className="text-[9px] font-black text-emerald-500 uppercase bg-emerald-50 px-2 py-1 rounded-lg shrink-0">Done</span>
                         </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Transactions Table */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-slate-50 flex items-center justify-between">
+                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Recent Payouts</h4>
+                  <button className="text-[10px] font-black text-emerald-600 uppercase tracking-widest hover:text-emerald-700 transition-colors">Export CSV</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50/50">
+                      <tr>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Job Type</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Client</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {completedJobs.slice(0, 5).map((j, i) => (
+                        <tr key={i} className="hover:bg-slate-50/30 transition-colors">
+                          <td className="px-6 py-4">
+                        <p className="text-xs font-bold text-slate-900">{j.booking?.preferred_date ? new Date(j.booking.preferred_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBD"}</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="text-xs font-black text-slate-700 capitalize">{j.booking?.service}</span>
+                          </td>
+                          <td className="px-6 py-4 text-xs font-bold text-slate-500">{j.booking?.user?.name}</td>
+                          <td className="px-6 py-4 text-xs font-black text-slate-900">$85.00</td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase tracking-widest border border-emerald-100">Settled</span>
+                          </td>
+                        </tr>
                       ))}
-                    </div>
-                  )}
+                      {completedJobs.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="px-6 py-12 text-center text-slate-400 font-bold text-xs">No transaction history yet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
           )}
+
 
           {/* ── SCHEDULE TAB ── */}
           {activeTab === "my_schedule" && (
@@ -711,14 +628,14 @@ export default function WorkerDashboard() {
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Start Time</label>
                     <select value={slotForm.start_time} onChange={e => setSlotForm(f => ({ ...f, start_time: e.target.value }))}
                       className="w-full bg-slate-50 border-2 border-transparent rounded-xl px-4 py-3 font-bold text-slate-900 text-sm outline-none focus:border-emerald-500 transition-all">
-                      {["06:00 AM","07:00 AM","08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM","01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM","06:00 PM","07:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
+                      {["06:00 AM", "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">End Time</label>
                     <select value={slotForm.end_time} onChange={e => setSlotForm(f => ({ ...f, end_time: e.target.value }))}
                       className="w-full bg-slate-50 border-2 border-transparent rounded-xl px-4 py-3 font-bold text-slate-900 text-sm outline-none focus:border-emerald-500 transition-all">
-                      {["07:00 AM","08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM","01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM","06:00 PM","07:00 PM","08:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
+                      {["07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM", "08:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
                 </div>
@@ -778,10 +695,10 @@ export default function WorkerDashboard() {
           )}
 
           {/* ── JOB LIST TABS ── */}
-          {!["profile","analytics","my_schedule"].includes(activeTab) && (
+          {!["my_schedule", "settings", "help", "profile"].includes(activeTab) && (
             <div className="space-y-4">
               {filteredJobs.map(a => {
-                const isMarket    = activeTab === "open_market";
+                const isMarket = activeTab === "open_market";
                 const { canStart, canComplete, label } = calculateJobTimings(a);
                 return (
                   <div key={a.id} onClick={() => setSelectedJob(a)}
@@ -842,21 +759,21 @@ export default function WorkerDashboard() {
                               return (
                                 <>
                                   <div className="bg-emerald-50 border border-emerald-100 rounded-xl py-3 px-2 text-center mb-1">
-                                      <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest leading-none">Auto Allotted</p>
-                                      <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">{timeLabel || "Direct Assignment"}</p>
+                                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest leading-none">Auto Allotted</p>
+                                    <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">{timeLabel || "Direct Assignment"}</p>
                                   </div>
-                                  
-                                  <button 
+
+                                  <button
                                     onClick={e => { e.stopPropagation(); updateStatus(a.id, "in_progress"); }}
                                     disabled={!canStart}
                                     className="btn-pro btn-pro-primary w-full shadow-lg shadow-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:!bg-slate-300 disabled:!shadow-none disabled:!border-slate-200">
                                     {canStart ? "Start Work Now" : "Waiting for Slot"}
                                   </button>
-                                  
+
                                   {(() => {
                                     try {
                                       if (!a.booking?.preferred_time) return null;
-                                      const startTimePart = a.booking.preferred_time.split(/\s*[-\u2013]\s*/)[0].trim();
+                                      const startTimePart = a.booking.preferred_time.split(/\s*[–-]\s*/)[0].trim();
                                       const startDt = new Date(`${a.booking.preferred_date} ${startTimePart}`);
                                       if (!canStart && new Date() < new Date(startDt.getTime() - 24 * 60 * 60 * 1000)) {
                                         return (
@@ -866,7 +783,7 @@ export default function WorkerDashboard() {
                                           </button>
                                         );
                                       }
-                                    } catch(e) {}
+                                    } catch (e) { }
                                     return null;
                                   })()}
                                 </>
@@ -901,7 +818,7 @@ export default function WorkerDashboard() {
                       <p><span className="text-slate-400">Account:</span> {worker?.email}</p>
                       <p><span className="text-slate-400">Worker ID:</span> {worker?.id}</p>
                       <p><span className="text-slate-400">Trades:</span> {JSON.stringify(worker?.specializations)}</p>
-                      <p><span className="text-slate-400">Lead Pool:</span> {availableJobs?.length}</p>
+
                       <p><span className="text-slate-400">Tab:</span> {activeTab}</p>
                       <p className="mt-3 text-[9px] text-slate-400 font-sans italic leading-relaxed">Jobs only appear if they match your Trades and available Slots. Check "My Schedule" to add open slots.</p>
                     </div>
@@ -910,6 +827,285 @@ export default function WorkerDashboard() {
               )}
             </div>
           )}
+          {/* ── PROFILE TAB ── */}
+          {activeTab === "profile" && profileForm && (
+            <div className="space-y-8 fade-in max-w-4xl">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm space-y-6">
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 mb-4">Identity & Contact</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Full Name</label>
+                          <input type="text" value={profileForm.name} onChange={e => setProfileForm(p => ({ ...p, name: e.target.value }))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold outline-none focus:border-emerald-500 transition-all" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Phone Number</label>
+                          <input type="tel" value={profileForm.phone} onChange={e => setProfileForm(p => ({ ...p, phone: e.target.value }))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold outline-none focus:border-emerald-500 transition-all" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 mb-4">Trade Specializations</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {[{ v: "hvac", l: "HVAC" }, { v: "plumbing", l: "Plumbing" }, { v: "electrical", l: "Electrical" }, { v: "general", l: "General" }].map(s => {
+                          const isSel = profileForm.specializations.includes(s.v);
+                          return (
+                            <button key={s.v} type="button" onClick={() => { const cur = profileForm.specializations; setProfileForm(p => ({ ...p, specializations: isSel ? cur.filter(v => v !== s.v) : [...cur, s.v] })); }} className={`px-4 py-4 rounded-2xl text-xs font-black border-2 transition-all flex flex-col items-center gap-2 ${isSel ? `bg-emerald-50 text-emerald-600 border-emerald-500` : "bg-white text-slate-400 border-slate-50 hover:border-slate-200"}`}>
+                              <div className={`w-2 h-2 rounded-full ${isSel ? "bg-emerald-500" : "bg-slate-200"}`} />{s.l}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-slate-50">
+                      <button onClick={saveSettings} disabled={saving || profileForm.specializations.length === 0} className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-lg shadow-emerald-900/20 transition-all text-sm uppercase tracking-widest">
+                        {saving ? "Updating Profile..." : "Update Profile"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="bg-slate-900 rounded-[32px] p-8 text-white relative overflow-hidden shadow-2xl">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/20 blur-3xl" />
+                    <div className="relative z-10 text-center">
+                      <div className="w-20 h-20 rounded-[32px] bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white font-black text-3xl mx-auto mb-4 shadow-xl border-4 border-white/10">
+                        {worker.name?.charAt(0)}
+                      </div>
+                      <h4 className="text-xl font-black">{worker.name}</h4>
+                      <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] mt-1">Verified Technician</p>
+                      <div className="mt-6 pt-6 border-t border-white/5 space-y-4 text-left">
+                        <div className="flex justify-between items-center">
+                          <p className="text-[10px] font-black text-slate-500 uppercase">Worker ID</p>
+                          <p className="text-xs font-mono font-bold text-slate-300">#{worker.id?.split("-")[0]}</p>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <p className="text-[10px] font-black text-slate-500 uppercase">Join Date</p>
+                          <p className="text-xs font-bold text-slate-300">April 2024</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-50 rounded-3xl p-6 border border-emerald-100">
+                    <div className="flex items-center gap-3 mb-3">
+                      <LucideIcon d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" className="text-emerald-500 w-5 h-5" />
+                      <p className="text-[10px] font-black text-emerald-900 uppercase tracking-widest">Active Status</p>
+                    </div>
+                    <p className="text-xs text-emerald-700 font-medium leading-relaxed">Your profile is visible to dispatch and you are eligible for multi-trade leads.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── SETTINGS TAB ── */}
+          {activeTab === "settings" && (
+            <div className="flex bg-white rounded-[32px] border border-slate-100 shadow-xl overflow-hidden fade-in min-h-[600px]">
+              {/* Settings nav */}
+              <div className="w-64 bg-slate-50 border-r border-slate-100 pt-8 px-4 flex flex-col gap-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.25em] px-3 mb-2">Categories</p>
+                {SETTINGS_SECTIONS.map(s => (
+                  <button key={s.id} onClick={() => setActiveSection(s.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-left ${activeSection === s.id ? "bg-white text-emerald-700 shadow-sm border border-slate-100" : "text-slate-500 hover:text-slate-800 hover:bg-white/50"
+                      } ${s.id === "danger" ? "text-red-500 hover:text-red-600 mt-auto mb-4" : ""}`}>
+                    <LucideIcon d={s.icon} className={`w-4 h-4 shrink-0 ${activeSection === s.id ? "text-emerald-600" : s.id === "danger" ? "text-red-400" : "text-slate-400"}`} />
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Settings content */}
+              <div className="flex-1 p-10 overflow-y-auto">
+                {settingsSaved && (
+                  <div className="mb-6 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center gap-3">
+                    <LucideIcon d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" className="w-5 h-5 text-emerald-500" />
+                    <p className="text-sm font-black text-emerald-700">Changes saved successfully!</p>
+                  </div>
+                )}
+
+
+                {activeSection === "notifications" && (
+                  <div className="space-y-6">
+                    <div><h2 className="text-xl font-black text-slate-900">Notifications</h2><p className="text-xs text-slate-400 mt-1 font-bold">Control which alerts you receive.</p></div>
+                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Job Alerts</p>
+                      <Toggle value={notifPrefs.newLead} onChange={v => setNotifPrefs(p => ({ ...p, newLead: v }))} label="New Lead Available" sub="Get notified when a job in your area opens up" />
+                      <Toggle value={notifPrefs.jobAssigned} onChange={v => setNotifPrefs(p => ({ ...p, jobAssigned: v }))} label="Direct Job Assignment" sub="Admin directly assigns you a job" />
+                      <Toggle value={notifPrefs.scheduleReminder} onChange={v => setNotifPrefs(p => ({ ...p, scheduleReminder: v }))} label="Schedule Reminders" sub="Alerts for upcoming work slots" />
+                    </div>
+                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">System</p>
+                      <Toggle value={notifPrefs.systemUpdates} onChange={v => setNotifPrefs(p => ({ ...p, systemUpdates: v }))} label="System Updates" sub="Important changes to the worker platform" />
+                    </div>
+                  </div>
+                )}
+
+                {activeSection === "schedule_prefs" && (
+                  <div className="space-y-6">
+                    <div><h2 className="text-xl font-black text-slate-900">Schedule Preferences</h2><p className="text-xs text-slate-400 mt-1 font-bold">Customize how your availability is managed.</p></div>
+                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Workflow</p>
+                      <Toggle value={schedPrefs.autoAccept} onChange={v => setSchedPrefs(p => ({ ...p, autoAccept: v }))} label="Auto-Accept Leads" sub="Automatically claim leads that match your trades" />
+                      <Toggle value={schedPrefs.bufferBetweenJobs} onChange={v => setSchedPrefs(p => ({ ...p, bufferBetweenJobs: v }))} label="Travel Buffer" sub="Add 30 mins between back-to-back jobs" />
+                      <Toggle value={schedPrefs.weekendsAvailable} onChange={v => setSchedPrefs(p => ({ ...p, weekendsAvailable: v }))} label="Weekend Availability" sub="Allow dispatch to see you on weekends" />
+                    </div>
+                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Workload</p>
+                      <div className="flex items-center justify-between py-4">
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">Max Jobs Per Day</p>
+                          <p className="text-xs text-slate-400 mt-0.5">Limit your daily assignment volume</p>
+                        </div>
+                        <select value={schedPrefs.maxJobsPerDay} onChange={e => setSchedPrefs(p => ({ ...p, maxJobsPerDay: e.target.value }))} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold outline-none focus:border-emerald-400">
+                          {["1", "2", "3", "4", "5", "Unlimited"].map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeSection === "privacy" && (
+                  <div className="space-y-6">
+                    <div><h2 className="text-xl font-black text-slate-900">Privacy & Security</h2><p className="text-xs text-slate-400 mt-1 font-bold">Manage your data visibility and account security.</p></div>
+                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Visibility</p>
+                      <Toggle value={privacyPrefs.showPhone} onChange={v => setPrivacyPrefs(p => ({ ...p, showPhone: v }))} label="Show Phone to Customers" sub="Clients can see your number before job starts" />
+                      <Toggle value={privacyPrefs.locationSharing} onChange={v => setPrivacyPrefs(p => ({ ...p, locationSharing: v }))} label="Real-time Tracking" sub="Share location with dispatch while on duty" />
+                    </div>
+                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Security</p>
+                      <Toggle value={privacyPrefs.twoFactor} onChange={v => setPrivacyPrefs(p => ({ ...p, twoFactor: v }))} label="Two-Factor Authentication" sub="Require code on login for extra security" />
+                      <div className="pt-4 border-t border-slate-200/50">
+                        <button className="text-xs font-black text-emerald-600 hover:text-emerald-700 uppercase tracking-widest">Change Password</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeSection === "appearance" && (
+                  <div className="space-y-6">
+                    <div><h2 className="text-xl font-black text-slate-900">Appearance</h2><p className="text-xs text-slate-400 mt-1 font-bold">Customize how the worker portal looks.</p></div>
+                    <div className="bg-slate-50 rounded-2xl p-8 border border-slate-100 text-center">
+                      <div className="w-16 h-16 rounded-3xl bg-slate-200 flex items-center justify-center mx-auto mb-4">
+                        <LucideIcon d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" className="w-8 h-8 text-slate-400" />
+                      </div>
+                      <p className="text-sm font-black text-slate-900">Dark Mode is coming soon!</p>
+                      <p className="text-xs text-slate-400 mt-1 font-bold">We're working on a beautiful dark theme for late-night shifts.</p>
+                    </div>
+                  </div>
+                )}
+
+                {activeSection === "danger" && (
+                  <div className="space-y-6">
+                    <div><h2 className="text-xl font-black text-red-600">Danger Zone</h2><p className="text-xs text-slate-400 mt-1 font-bold">Irreversible actions for your worker account.</p></div>
+                    <div className="bg-red-50 rounded-2xl p-6 border border-red-100">
+                      <div className="flex items-center justify-between py-4 border-b border-red-100">
+                        <div>
+                          <p className="text-sm font-bold text-red-900">Reset Local Cache</p>
+                          <p className="text-xs text-red-400 mt-0.5">Clears saved preferences and logout</p>
+                        </div>
+                        <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl text-xs font-black uppercase tracking-widest transition-all">Reset</button>
+                      </div>
+                      <div className="flex items-center justify-between py-4">
+                        <div>
+                          <p className="text-sm font-bold text-red-900">Deactivate Account</p>
+                          <p className="text-xs text-red-400 mt-0.5">Mark your profile as inactive to dispatch</p>
+                        </div>
+                        <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-red-900/20">Deactivate</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Unified Save Button */}
+                {activeSection !== "appearance" && activeSection !== "danger" && (
+                  <div className="mt-10 pt-10 border-t border-slate-100">
+                    <button
+                      onClick={saveSettings}
+                      disabled={saving || (profileForm && profileForm.specializations.length === 0)}
+                      className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-lg shadow-emerald-900/20 transition-all text-sm uppercase tracking-widest disabled:opacity-50">
+                      {saving ? "Saving Changes..." : "Save All Settings"}
+                    </button>
+                    <p className="text-[10px] text-center text-slate-400 font-bold mt-4 uppercase tracking-widest">Settings are synced to your secure cloud profile</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── HELP TAB ── */}
+          {activeTab === "help" && (
+            <div className="space-y-8 fade-in pb-20">
+              {/* Hero */}
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[40px] p-10 text-white relative overflow-hidden shadow-2xl">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[80px]" />
+                <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8">
+                  <div className="text-center md:text-left">
+                    <h3 className="text-3xl font-black mb-3">How can we help?</h3>
+                    <p className="text-slate-400 text-sm max-w-sm">Search our knowledge base or submit a ticket to our 24/7 support team.</p>
+                  </div>
+                  <div className="w-full max-w-md relative">
+                    <LucideIcon d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" className="w-5 h-5 text-slate-400 absolute left-5 top-1/2 -translate-y-1/2" />
+                    <input type="text" placeholder="Search FAQ..." value={helpSearch} onChange={e => setHelpSearch(e.target.value)}
+                      className="w-full bg-white/10 border border-white/20 rounded-2xl pl-12 pr-6 py-4 text-white placeholder-slate-500 outline-none focus:border-emerald-500 transition-all" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">Frequently Asked Questions</p>
+                  <div className="space-y-3">
+                    {FAQ.filter(f => f.q.toLowerCase().includes(helpSearch.toLowerCase()) || f.a.toLowerCase().includes(helpSearch.toLowerCase())).map((f, i) => (
+                      <div key={i} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden transition-all hover:shadow-md">
+                        <button onClick={() => setOpenFaq(openFaq === i ? null : i)} className="w-full flex items-center justify-between px-8 py-5 text-left gap-4">
+                          <p className="text-sm font-black text-slate-900">{f.q}</p>
+                          <LucideIcon d={openFaq === i ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} className="w-4 h-4 text-slate-400" />
+                        </button>
+                        {openFaq === i && <div className="px-8 pb-6 text-sm text-slate-600 font-medium leading-relaxed border-t border-slate-50 pt-4">{f.a}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-8">
+                  <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-xl">
+                    <h4 className="text-lg font-black text-slate-900 mb-1">Submit Ticket</h4>
+                    <p className="text-xs text-slate-400 mb-6 font-bold tracking-tight">Direct line to operations team.</p>
+                    {ticketSubmitted ? (
+                      <div className="text-center py-10 bg-emerald-50 rounded-3xl border border-emerald-100">
+                        <LucideIcon d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+                        <p className="text-sm font-black text-emerald-700">Ticket Sent!</p>
+                        <button onClick={() => setTicketSubmitted(false)} className="mt-4 text-[10px] font-black text-emerald-600 uppercase tracking-widest">Send another</button>
+                      </div>
+                    ) : (
+                      <form onSubmit={submitTicket} className="space-y-4">
+                        <input required placeholder="Subject" value={helpTicket.subject} onChange={e => setHelpTicket(p => ({ ...p, subject: e.target.value }))} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold outline-none focus:border-emerald-500 transition-all" />
+                        <textarea required rows="4" placeholder="How can we help?" value={helpTicket.desc} onChange={e => setHelpTicket(p => ({ ...p, desc: e.target.value }))} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold outline-none focus:border-emerald-500 transition-all resize-none" />
+                        <button type="submit" className="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-lg shadow-emerald-900/10 transition-all text-[10px] uppercase tracking-widest">Send Ticket</button>
+                      </form>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4">Guides</p>
+                    {GUIDES.map(g => (
+                      <button key={g.title} className="w-full bg-white rounded-2xl p-4 flex items-center gap-4 border border-slate-100 hover:shadow-lg transition-all group">
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${g.color} flex items-center justify-center text-white shrink-0 shadow-md group-hover:scale-110 transition-transform`}><LucideIcon d={g.icon} className="w-5 h-5" /></div>
+                        <p className="text-xs font-black text-slate-900 text-left">{g.title}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </main>
 
@@ -926,7 +1122,7 @@ export default function WorkerDashboard() {
                 <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${notification.type === "assignment" ? "text-blue-400" : "text-emerald-400"}`}>{notification.title}</p>
                 <p className="text-sm font-bold leading-tight mb-4">{notification.msg}</p>
                 <div className="flex items-center gap-2">
-                  {["assignment","lead"].includes(notification.type) ? (
+                  {["assignment", "lead"].includes(notification.type) ? (
                     <>
                       <button onClick={() => { setSelectedJob(notification.fullData); setNotification(null); }} className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-widest ${notification.type === "assignment" ? "bg-blue-600 hover:bg-blue-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
                         View Details
@@ -941,8 +1137,8 @@ export default function WorkerDashboard() {
                   )}
                 </div>
               </div>
+              {notification.type === "lead" && <div className="absolute bottom-0 left-0 h-0.5 bg-emerald-500/30 w-full"><div className="h-full bg-emerald-500 animate-progress-shrink" /></div>}
             </div>
-            {notification.type === "lead" && <div className="absolute bottom-0 left-0 h-0.5 bg-emerald-500/30 w-full"><div className="h-full bg-emerald-500 animate-progress-shrink" /></div>}
           </div>
         </div>
       )}
@@ -1002,16 +1198,16 @@ export default function WorkerDashboard() {
               <div className="pt-4 border-t border-slate-100 space-y-3">
                 {(() => {
                   const { canStart, canComplete, label } = calculateJobTimings(selectedJob);
-                  
+
                   // Calculate if cancellation is allowed (Strict 24h Deadline)
                   let canCancel = true;
                   if (selectedJob.booking?.preferred_time) {
                     try {
-                      const startTimePart = selectedJob.booking.preferred_time.split(/\s*[-\u2013]\s*/)[0].trim();
+                      const startTimePart = selectedJob.booking.preferred_time.split(/\s*[–-]\s*/)[0].trim();
                       const startDt = new Date(`${selectedJob.booking.preferred_date} ${startTimePart}`);
                       const deadlineDt = new Date(startDt.getTime() - 24 * 60 * 60 * 1000);
                       if (new Date() >= deadlineDt) canCancel = false;
-                    } catch(e) {}
+                    } catch (e) { }
                   }
 
                   if (selectedJob.status === "pending")
@@ -1022,7 +1218,7 @@ export default function WorkerDashboard() {
                       <div className="space-y-4">
                         <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "in_progress"); setSelectedJob(null); }} disabled={!canStart} className="btn-pro btn-pro-primary w-full !py-4 text-base shadow-xl shadow-emerald-900/10 disabled:opacity-50">Confirm Arrival & Start Work</button>
                         {canCancel && (
-                           <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "rejected"); setSelectedJob(null); }} className="w-full py-4 rounded-2xl border-2 border-red-50 text-red-500 font-black hover:bg-red-50 transition-all text-sm">Cancel Allotment</button>
+                          <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "rejected"); setSelectedJob(null); }} className="w-full py-4 rounded-2xl border-2 border-red-50 text-red-500 font-black hover:bg-red-50 transition-all text-sm">Cancel Allotment</button>
                         )}
                         {!canCancel && <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 py-3 rounded-2xl border border-slate-100">🚫 Cancellation Locked (Under 24h left)</p>}
                         <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Mark as Could Not Complete</button>
@@ -1032,8 +1228,8 @@ export default function WorkerDashboard() {
                     return (
                       <div className="space-y-4">
                         <div className="space-y-2">
-                           {!canComplete && <p className="text-center text-xs font-bold text-slate-400 uppercase">Wait until near end of slot</p>}
-                           <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "completed"); setSelectedJob(null); }} disabled={!canComplete} className="btn-pro btn-pro-primary w-full !bg-sky-600 hover:!bg-sky-700 !py-4 text-base disabled:opacity-40">Mark as Successfully Completed</button>
+                          {!canComplete && <p className="text-center text-xs font-bold text-slate-400 uppercase">Wait until near end of slot</p>}
+                          <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "completed"); setSelectedJob(null); }} disabled={!canComplete} className="btn-pro btn-pro-primary w-full !bg-sky-600 hover:!bg-sky-700 !py-4 text-base disabled:opacity-40">Mark as Successfully Completed</button>
                         </div>
                         <button onClick={e => { e.stopPropagation(); updateStatus(selectedJob.id, "not_completed"); setSelectedJob(null); }} className="w-full py-2 text-[10px] font-black text-slate-400 hover:text-red-400 transition-colors uppercase tracking-widest">Job Not Completed</button>
                       </div>
@@ -1047,21 +1243,19 @@ export default function WorkerDashboard() {
         </div>
       )}
 
-      <style jsx global>{`
-        @keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes slide-up { from { transform: translateY(24px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
-        @keyframes bounce-in { 0% { transform: scale(0.8) translateY(-10px); opacity: 0 } 70% { transform: scale(1.03) } 100% { transform: scale(1) translateY(0); opacity: 1 } }
-        @keyframes progress-shrink { from { width: 100% } to { width: 0% } }
-        .fade-in { animation: fade-in 0.3s ease-out }
-        .animate-fade-in { animation: fade-in 0.25s ease-out }
-        .animate-slide-up { animation: slide-up 0.4s cubic-bezier(0.16,1,0.3,1) }
-        .animate-bounce-in { animation: bounce-in 0.4s cubic-bezier(0.16,1,0.3,1) }
-        .animate-progress-shrink { animation: progress-shrink 15s linear forwards }
-        .custom-scrollbar::-webkit-scrollbar { width: 5px }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #cbd5e1 }
-      `}</style>
+
     </div>
+  );
+}
+
+export default function WorkerDashboard() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }
