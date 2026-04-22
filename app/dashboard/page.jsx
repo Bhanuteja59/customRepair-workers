@@ -1007,6 +1007,7 @@ export default function WorkerDashboard() {
               {notification.type === "lead" && <div className="absolute bottom-0 left-0 h-0.5 bg-emerald-500/30 w-full"><div className="h-full bg-emerald-500 animate-progress-shrink" /></div>}
             </div>
           </div>
+        </div>
       )}
 
           {/* ── Job Detail Modal ─────────────────────────────────────────────── */}
